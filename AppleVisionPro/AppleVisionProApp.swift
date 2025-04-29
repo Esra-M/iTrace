@@ -7,27 +7,19 @@
 
 import SwiftUI
 
+
 @main
 struct AppleVisionProApp: App {
 
-    @State private var appModel = AppModel()
-
     var body: some Scene {
-        WindowGroup {
+        WindowGroup() {
             ContentView()
-                .environment(appModel)
         }
-
-        ImmersiveSpace(id: appModel.immersiveSpaceID) {
-            ImmersiveView()
-                .environment(appModel)
-                .onAppear {
-                    appModel.immersiveSpaceState = .open
-                }
-                .onDisappear {
-                    appModel.immersiveSpaceState = .closed
-                }
+        
+        ImmersiveSpace(id: "Volume"){
+            SelectionView()
         }
-        .immersionStyle(selection: .constant(.full), in: .full)
+        
+        .windowResizability(.contentSize)
     }
 }

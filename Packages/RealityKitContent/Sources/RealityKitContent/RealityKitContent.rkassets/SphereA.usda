@@ -12,7 +12,7 @@ def Xform "Root"
         bindMaterialAs = "weakerThanDescendants"
     )
 
-    def Sphere "Sphere" (
+    def Sphere "SphereA" (
         active = true
         prepend apiSchemas = ["MaterialBindingAPI"]
     )
