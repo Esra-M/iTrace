@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct TypingView: View {
+    
     let targetPhrase = "The quick brown fox jumps over the lazy dog"
     @State private var currentIndex: Int = 0
     @State private var userInput: String = ""
@@ -17,44 +18,57 @@ struct TypingView: View {
     @State private var isCompleted: Bool = false
     @FocusState private var isFocused: Bool
 
+    @EnvironmentObject private var appState: AppState
+
     var body: some View {
-        VStack(spacing: 30) {
-
-            Text("Typing Speed Test")
-                .font(.title)
-                .bold()
-
-            // Phrase
-            HStack{
-                let Phrase = targetPhrase.replacingOccurrences(of: " ", with: "·")
-                ForEach(Array(Phrase.enumerated()), id: \.offset) { index, char in
-                    Text(String(char))
-                        .underline(index == currentIndex)
-                        .font(.system(size: 22, design: .monospaced))
-                        .foregroundColor(mistakeIndices.contains(index) && index < currentIndex ? .red : .white)
-                        .onTapGesture { isFocused = true }
-                }
+        ZStack {
+            
+            Button(action: {
+                appState.currentPage = .test
+            }) {
+                Image(systemName: "chevron.backward")
             }
-
-            // Input
-            TextField("", text: $userInput)
-                .focused($isFocused)
-                .frame(width: 0, height: 0)
-                .onChange(of: userInput) {oldValue, newValue in
-                    if let inputChar = newValue.last {
-                        handleInput(inputChar: inputChar)
-                        userInput = ""
+            .clipShape(Circle())
+            .offset(x: -580, y: -300)
+            
+            VStack(spacing: 30) {
+                
+                Text("Typing Speed Test")
+                    .font(.title)
+                    .bold()
+                
+                // Phrase
+                HStack{
+                    let Phrase = targetPhrase.replacingOccurrences(of: " ", with: "·")
+                    ForEach(Array(Phrase.enumerated()), id: \.offset) { index, char in
+                        Text(String(char))
+                            .underline(index == currentIndex)
+                            .font(.system(size: 22, design: .monospaced))
+                            .foregroundColor(mistakeIndices.contains(index) && index < currentIndex ? .red : .white)
+                            .onTapGesture { isFocused = true }
                     }
                 }
-                .onAppear{isFocused = true}
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .keyboardType(.asciiCapable)
-
-            // Results
-            if isCompleted {
-                Text("Speed: \(String(format: "%.1f", calculateWPM())) WPM")
-                Text("Accuracy: \(String(format: "%.1f", calculateAccuracy()))%")
+                
+                // Input
+                TextField("", text: $userInput)
+                    .focused($isFocused)
+                    .frame(width: 0, height: 0)
+                    .onChange(of: userInput) {oldValue, newValue in
+                        if let inputChar = newValue.last {
+                            handleInput(inputChar: inputChar)
+                            userInput = ""
+                        }
+                    }
+                    .onAppear{isFocused = true}
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .keyboardType(.asciiCapable)
+                
+                // Results
+                if isCompleted {
+                    Text("Speed: \(String(format: "%.1f", calculateWPM())) WPM")
+                    Text("Accuracy: \(String(format: "%.1f", calculateAccuracy()))%")
+                }
             }
         }
     }
@@ -93,8 +107,4 @@ struct TypingView: View {
         let correctCharacters = targetPhrase.count - mistakeIndices.count
         return (Double(correctCharacters) / Double(targetPhrase.count)) * 100
     }
-}
-
-#Preview(windowStyle: .automatic) {
-    TypingView()
 }

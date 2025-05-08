@@ -9,8 +9,8 @@ import SwiftUI
 
 struct ContentView: View {
     
-    @State private var start = false
-    
+    @EnvironmentObject private var appState: AppState
+
     var body: some View {
         NavigationStack {
             VStack {
@@ -59,17 +59,12 @@ struct ContentView: View {
                 .font(.title3)
                 
                 Button("Start") {
-                    start = true
+                    
+                    appState.currentPage = .keyboard
                 }
                 .font(.title)
-                .navigationDestination(isPresented: $start) {
-                    KeyboardView()
-                }
+
             }
         }
     }
-}
-
-#Preview() {
-    ContentView()
 }

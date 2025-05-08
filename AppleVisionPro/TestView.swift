@@ -4,14 +4,14 @@
 //
 //  Created by Esra Mehmedova on 20.04.25.
 //
+
 import SwiftUI
 
 struct TestView: View {
-    
-    @State private var typing = false
+
+    @EnvironmentObject private var appState: AppState
 
     @Environment(\.openImmersiveSpace) var openImmersiveSpace
-    @Environment(\.dismissImmersiveSpace) var dismissImmersiveSpace
 
     var body: some View {
         VStack {
@@ -22,39 +22,72 @@ struct TestView: View {
 
             HStack(spacing: 50){
                 VStack{
-                    Image(systemName: "keyboard")
+                    Image(systemName: "character.cursor.ibeam")
                         .font(.system(size: 50))
                         .padding()
                     
                     Button("Typing") {
-                        typing = true
+                        appState.currentPage = .type
                     }
-                    .font(.title)
-                    .navigationDestination(isPresented: $typing) {
-                        TypingView()
+
+                }
+                .frame(height: 150, alignment: .bottom)
+                
+                VStack{
+                    Image(systemName: "cursorarrow.rays")
+                        .font(.system(size: 50))
+                        .padding()
+                    
+                    Button("Clicling") {
+                        appState.currentPage = .click
                     }
+
+                }
+                .frame(height: 150, alignment: .bottom)
+                
+                VStack{
+                    Image(systemName: "point.topleft.down.to.point.bottomright.filled.curvepath")
+                        .font(.system(size: 50))
+                        .padding()
+                    
+                    Button("Drag") {
+                        appState.currentPage = .reach
+                        Task {
+                            await openImmersiveSpace(id: "reachObject")
+                        }
+                    }
+
                 }
                 .frame(height: 150, alignment: .bottom)
 
                 VStack{
                     Image(systemName: "dot.scope")
                         .font(.system(size: 50))
+                        .padding()
                     
-                    Button("Selection") {
+                    Button("Target") {
+                        appState.currentPage = .select
                         Task {
-                            await dismissImmersiveSpace() // Close if anything's already active
-                            try? await Task.sleep(nanoseconds: 500_000_000) // Wait 0.5s
-                            await openImmersiveSpace(id: "Volume")
+                            await openImmersiveSpace(id: "selectionObject")
                         }
                     }
-                    .font(.title)
+
+                }
+                .frame(height: 150, alignment: .bottom)
+                
+                VStack{
+                    Image(systemName: "circle.grid.3x3.fill")
+                        .font(.system(size: 50))
+                        .padding()
+                    
+                    Button("Eye Tracking") {
+                        appState.currentPage = .eyeTracking
+
+                    }
+
                 }
                 .frame(height: 150, alignment: .bottom)
             }
         }
     }
-}
-
-#Preview(windowStyle: .automatic){
-    TestView()
 }

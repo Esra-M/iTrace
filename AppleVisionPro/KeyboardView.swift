@@ -9,7 +9,7 @@ import SwiftUI
 
 struct KeyboardView: View {
     
-    @State private var done = false
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         VStack {
@@ -24,17 +24,10 @@ struct KeyboardView: View {
                 .padding()
             
             Button("Done") {
-                done = true
+                appState.currentPage = .test
             }
             .font(.title)
-            .padding()    
-            .navigationDestination(isPresented: $done) {
-                TestView()
-            }
+
         }
     }
-}
-
-#Preview(windowStyle: .automatic){
-    KeyboardView()
 }

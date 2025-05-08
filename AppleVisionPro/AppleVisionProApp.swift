@@ -6,20 +6,54 @@
 //
 
 import SwiftUI
+import RealityKit
+import RealityKitContent
 
 
 @main
 struct AppleVisionProApp: App {
+    @StateObject private var appState = AppState()
 
-    var body: some Scene {
+    var body: some SwiftUI.Scene {
+        
         WindowGroup() {
-            ContentView()
+            Group {
+                switch appState.currentPage {
+                case .content:
+                    ContentView()
+                case .keyboard:
+                    KeyboardView()
+                case .test:
+                    TestView()
+                case .type:
+                    TypingView()
+                case .click:
+                    ClickingView()
+                case .reach:
+                    ReachView()
+                case .select:
+                    SelectionView()
+                case .eyeTracking:
+                    EyeTrackingView()
+                }
+            }
+            .environmentObject(appState)
+            .animation(.easeInOut, value: appState.currentPage)
+        }
+
+        WindowGroup(id: "reach") {
+            ReachView()
         }
         
-        ImmersiveSpace(id: "Volume"){
-            SelectionView()
+        ImmersiveSpace(id: "selectionObject"){
+            SelectionObjectsView()
         }
         
-        .windowResizability(.contentSize)
+        ImmersiveSpace(id: "reachObject"){
+            ReachObjectView()
+                .environmentObject(appState)
+        }
+
     }
 }
+
