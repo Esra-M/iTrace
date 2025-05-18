@@ -16,7 +16,7 @@ struct AppleVisionProApp: App {
 
     var body: some SwiftUI.Scene {
         
-        WindowGroup() {
+        WindowGroup(id: "main") {
             Group {
                 switch appState.currentPage {
                 case .content:
@@ -40,10 +40,11 @@ struct AppleVisionProApp: App {
             .environmentObject(appState)
             .animation(.easeInOut, value: appState.currentPage)
         }
-
-        WindowGroup(id: "reach") {
-            ReachView()
+        
+        ImmersiveSpace(id: "immersiveTracking"){
+            ImersiveTrackingView()
         }
+        
         
         ImmersiveSpace(id: "selectionObject"){
             SelectionObjectsView()

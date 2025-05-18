@@ -12,6 +12,8 @@ struct TestView: View {
     @EnvironmentObject private var appState: AppState
 
     @Environment(\.openImmersiveSpace) var openImmersiveSpace
+    @Environment(\.dismissWindow) private var dismissWindow
+
 
     var body: some View {
         VStack {
@@ -82,11 +84,28 @@ struct TestView: View {
                     
                     Button("Eye Tracking") {
                         appState.currentPage = .eyeTracking
-
+                        
                     }
-
+                    
                 }
                 .frame(height: 150, alignment: .bottom)
+                
+//                VStack{
+//                    Image(systemName: "circle.hexagongrid.fill")
+//                        .font(.system(size: 50))
+//                        .padding()
+//                    
+//                    Button("Imersive Tracking") {
+//                        Task {
+//                            let result = await openImmersiveSpace(id: "immersiveTracking")
+//                            if result == .opened {
+//                                dismissWindow(id: "main")
+//                            }
+//                        }
+//                    }
+//                }
+//                .frame(height: 150, alignment: .bottom)
+
             }
         }
     }

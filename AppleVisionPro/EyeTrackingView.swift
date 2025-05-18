@@ -3,7 +3,6 @@
 //  AppleVisionPro
 //
 //  Created by Esra Mehmedova on 28.04.25.
-//  Updated to add timeline slider for video scrubbing in toolbar
 //
 
 import SwiftUI
@@ -54,16 +53,19 @@ struct EyeTrackingView: View {
     @State private var displayedTime: Double = 0
     @State private var duration: Double = 0
 
+    @State private var isExporting = false
+
     let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 50)
 
-    @State private var video = AVPlayer(url: Bundle.main.url(forResource: "backgroundVideo", withExtension: "mp4")!)
+    @State private var video = AVPlayer(url: Bundle.main.url(forResource: "backgroundVideo1", withExtension: "mp4")!)
+
     @State private var isPlaying: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 VideoBackgroundView(player: video)
-                    .colorMultiply(secondPlayStarted ? .gray : .white)
+                    .colorMultiply((showHeatmap && currentTime >= duration) ? .black : (secondPlayStarted ? .gray : .white))
                     .ignoresSafeArea()
                     .disabled(true)
 
@@ -72,7 +74,7 @@ struct EyeTrackingView: View {
                         let row = id / 50
                         let column = id % 50
                         Rectangle()
-                            .stroke(Color.gray.opacity(0.1), lineWidth: 0)
+                            .stroke(Color.black.opacity(0.5), lineWidth: 0)
                             .background(
                                 ZStack {
                                     if showHeatmap && currentTime >= duration && tapCounts[id, default: 0] > 0 {
@@ -85,8 +87,8 @@ struct EyeTrackingView: View {
                                                     endRadius: geometry.size.width / 50 * 1.5
                                                 )
                                             )
-                                            .frame(width: geometry.size.width / 50 * 4, height: geometry.size.width / 50 * 4)
-                                            .offset(x: -geometry.size.width / 100, y: -geometry.size.width / 100)
+                                            .frame(width: geometry.size.width / CGFloat(columns.count) * 3,
+                                                   height: geometry.size.width / CGFloat(columns.count) * 3)
                                     }
 
                                     if showLiveTapHighlights && currentTime < duration && isTapNearCurrentTime(id: id) {
@@ -99,8 +101,8 @@ struct EyeTrackingView: View {
                                                     endRadius: geometry.size.width / 50 * 1.5
                                                 )
                                             )
-                                            .frame(width: geometry.size.width / 50 * 4, height: geometry.size.width / 50 * 4)
-                                            .offset(x: -geometry.size.width / 100, y: -geometry.size.width / 100)
+                                            .frame(width: geometry.size.width / CGFloat(columns.count) * 3,
+                                                   height: geometry.size.width / CGFloat(columns.count) * 3)
                                     }
                                 }
                             )
@@ -129,6 +131,19 @@ struct EyeTrackingView: View {
                 }
                 .clipShape(Circle())
                 .offset(x: -580, y: -300)
+
+                // Overlay during exporting
+                if isExporting {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false) // So interactions with video still work
+
+                    Text("Exporting...")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .transition(.opacity)
+                }
             }
             .onAppear {
                 Task {
@@ -169,16 +184,18 @@ struct EyeTrackingView: View {
             .toolbar {
                 ToolbarItem(placement: .bottomOrnament) {
                     HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let timeSinceLastPress = timeSinceLastPress,
-                               let id = lastPressedId,
-                               let coords = pressedCoordinates {
-                                Text("ID: \(id) • Coordinates: (\(coords.x), \(coords.y))")
-                                    .font(.footnote).bold()
-                                Text("Timestamp: \(String(format: "%.2f", videoTimestamp)) s")
-                                    .font(.caption2)
-                                Text("Since last click: \(String(format: "%.2f", timeSinceLastPress)) s")
-                                    .font(.caption2)
+                        if !secondPlayStarted {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let timeSinceLastPress = timeSinceLastPress,
+                                   let id = lastPressedId,
+                                   let coords = pressedCoordinates {
+                                    Text("ID: \(id) • Coordinates: (\(coords.x), \(coords.y))")
+                                        .font(.footnote).bold()
+                                    Text("Timestamp: \(String(format: "%.2f", videoTimestamp)) s")
+                                        .font(.caption2)
+                                    Text("Since last click: \(String(format: "%.2f", timeSinceLastPress)) s")
+                                        .font(.caption2)
+                                }
                             }
                         }
 
@@ -201,17 +218,63 @@ struct EyeTrackingView: View {
                                 }
                             }
                         })
-                        .onChange(of: sliderValue) {oldValue, newValue in
+                        .onChange(of: sliderValue) { oldValue, newValue in
                             if video.timeControlStatus == .paused {
                                 let time = CMTime(seconds: newValue, preferredTimescale: 600)
                                 video.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
                                 displayedTime = newValue
                             }
                         }
-                        .frame(width: 200)
-                        
+                        .frame(width: 300)
+
                         Text("\(String(format: "%.2f", sliderValue)) / \(String(format: "%.2f", duration))")
                             .font(.caption2)
+                            .frame(width: 100)
+
+                        if secondPlayStarted {
+                            Button() {
+                                guard !isExporting else { return }
+                                isExporting = true
+
+                                guard let videoURL = Bundle.main.url(forResource: "backgroundVideo1", withExtension: "mp4") else {
+                                    print("Video not found.")
+                                    isExporting = false
+                                    return
+                                }
+
+                                let exportName = "backgroundVideo1_heatmap_export"
+
+                                VideoDownloader.exportHeatmapOverlayVideo(
+                                    tapHistory: tapHistory,
+                                    videoURL: videoURL,
+                                    columns: 50,
+                                    totalCells: 1400,
+                                    outputFileName: exportName
+                                ) { exportedURL in
+                                    DispatchQueue.main.async {
+                                        isExporting = false
+                                        guard let exportedURL = exportedURL else { return }
+
+                                        let activityVC = UIActivityViewController(activityItems: [exportedURL], applicationActivities: nil)
+                                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                           let window = windowScene.windows.first,
+                                           let rootVC = window.rootViewController {
+                                            activityVC.popoverPresentationController?.sourceView = window
+                                            activityVC.popoverPresentationController?.sourceRect = CGRect(x: window.bounds.midX,
+                                                                                                          y: window.bounds.midY,
+                                                                                                          width: 0,
+                                                                                                          height: 0)
+                                            activityVC.popoverPresentationController?.permittedArrowDirections = []
+                                            rootVC.present(activityVC, animated: true)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "arrow.down.to.line.alt")
+                            }
+                            .help("Download Video with Heatmap")
+                            .disabled(isExporting)
+                        }
                     }
                     .padding()
                 }
@@ -225,12 +288,11 @@ struct EyeTrackingView: View {
 
     private func vibrantHeatmapColor(for count: Int, base: Color) -> Color {
         switch count {
-        case 1: return base.opacity(0.3)
-        case 2: return base.opacity(0.5)
-        case 3: return base.opacity(0.7)
-        case 4: return base.opacity(0.85)
+        case 1: return base.opacity(0.6)
+        case 2: return base.opacity(0.7)
+        case 3: return base.opacity(0.8)
+        case 4: return base.opacity(0.9)
         default: return count >= 5 ? base.opacity(1) : .clear
         }
     }
-
 }
