@@ -14,6 +14,7 @@ struct TestView: View {
     @Environment(\.openImmersiveSpace) var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
 
+    @State private var isLoadingEyeTracking = false
 
     var body: some View {
         VStack {
@@ -77,16 +78,18 @@ struct TestView: View {
                 }
                 .frame(height: 150, alignment: .bottom)
                 
-                VStack{
+                VStack {
                     Image(systemName: "circle.grid.3x3.fill")
                         .font(.system(size: 50))
                         .padding()
-                    
-                    Button("Eye Tracking") {
-                        appState.currentPage = .eyeTracking
-                        
+
+                    Button(isLoadingEyeTracking ? "Loading..." : "Eye Tracking") {
+                        isLoadingEyeTracking = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            appState.currentPage = .eyeTracking
+                        }
                     }
-                    
+                    .disabled(isLoadingEyeTracking)
                 }
                 .frame(height: 150, alignment: .bottom)
                 
