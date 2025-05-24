@@ -35,6 +35,9 @@ struct AppleVisionProApp: App {
                     SelectionView()
                 case .eyeTracking:
                     EyeTrackingView()
+                        .frame(
+                        minWidth: 1280, maxWidth: 1280,
+                        minHeight: 720, maxHeight: 720)
                 }
             }
             .environmentObject(appState)

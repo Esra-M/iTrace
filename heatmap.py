@@ -18,19 +18,19 @@ def generate_heatmap_video():
     video_file = request.files['video']
     clicks_json = request.form.get('clicks')
     clicks = json.loads(clicks_json)
-    rows = int(request.form.get('rows', 28))
-    cols = int(request.form.get('cols', 50))
+    width = int(request.form.get('width'))
+    height = int(request.form.get('height'))
 
     # Decode video
     temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     video_file.save(temp_input.name)
     cap = cv2.VideoCapture(temp_input.name)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    v_width, v_height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # Prepare output video
     temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    out = cv2.VideoWriter(temp_output.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    out = cv2.VideoWriter(temp_output.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (v_width, v_height))
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration = frame_count / fps
@@ -43,14 +43,17 @@ def generate_heatmap_video():
     dot_intervals = {}
 
     for click in clicks:
-        row = rows - 1 - click["row"]
-        col = click["col"]
+        x = int(click["x"])
+        y = int(click["y"])
+        y = v_height - 1 - y
+        x = min(max(x, 0), v_width - 1)
+        y = min(max(y, 0), v_height - 1)
         start_frame = max(0, int((click["timestamp"] * fps) - fade_duration))
         end_frame = start_frame + total_duration - 1
 
-        if (row, col) not in dot_intervals:
-            dot_intervals[(row, col)] = []
-        dot_intervals[(row, col)].append((start_frame, end_frame))
+        if (x, y) not in dot_intervals:
+            dot_intervals[(x, y)] = []
+        dot_intervals[(x, y)].append((start_frame, end_frame))
 
     def merge_intervals(intervals):
         intervals.sort()
@@ -69,9 +72,12 @@ def generate_heatmap_video():
     for key in dot_intervals:
         dot_intervals[key] = merge_intervals(dot_intervals[key])
 
-    brightness_per_frame = np.zeros((frame_count, rows, cols), dtype=np.float32)
+    # Size of dots
+    DOT_SIGMA = 40
 
-    for (row, col), intervals in dot_intervals.items():
+    brightness_per_frame = np.zeros((frame_count, v_height, v_width), dtype=np.float32)
+
+    for (x, y), intervals in dot_intervals.items():
         for (start, end) in intervals:
             for f in range(start, end + 1):
                 if f >= frame_count:
@@ -84,7 +90,7 @@ def generate_heatmap_video():
                 else:
                     brightness = 1.0
                 brightness = max(0.0, min(1.0, brightness))
-                brightness_per_frame[f, row, col] = max(brightness_per_frame[f, row, col], brightness)
+                brightness_per_frame[f, y, x] = max(brightness_per_frame[f, y, x], brightness)
 
     for i in range(frame_count):
         ret, frame = cap.read()
@@ -96,10 +102,10 @@ def generate_heatmap_video():
 
         click_grid = brightness_per_frame[i]
         if np.sum(click_grid) > 0:
-            blurred = gaussian_filter(click_grid, sigma=1.5)
-            fig, ax = plt.subplots(figsize=(cols / 5, rows / 5), dpi=10)
+            blurred = gaussian_filter(click_grid, sigma=DOT_SIGMA)
+            fig, ax = plt.subplots(figsize=(v_width / 100, v_height / 100), dpi=100)
             ax.imshow(blurred, cmap='inferno', interpolation='bicubic', origin='lower',
-                      extent=[0, cols, 0, rows], aspect='auto')
+                      extent=[0, v_width, 0, v_height], aspect='auto')
             ax.axis('off')
             plt.tight_layout(pad=0)
 
@@ -109,23 +115,23 @@ def generate_heatmap_video():
             buf.seek(0)
 
             heatmap = cv2.imdecode(np.frombuffer(buf.getvalue(), dtype=np.uint8), 1)
-            heatmap = cv2.resize(heatmap, (width, height))
+            heatmap = cv2.resize(heatmap, (v_width, v_height))
 
             frame = cv2.addWeighted(frame, 1.0, heatmap, 0.8, 0)
 
         out.write(frame)
 
     # Final full heatmap
-    final_grid = np.zeros((rows, cols))
-    for (row, col), intervals in dot_intervals.items():
+    final_grid = np.zeros((v_height, v_width))
+    for (x, y), intervals in dot_intervals.items():
         for (start, end) in intervals:
-            if 0 <= row < rows and 0 <= col < cols:
-                final_grid[row, col] += 1
+            if 0 <= x < v_width and 0 <= y < v_height:
+                final_grid[y, x] += 1
 
-    blurred = gaussian_filter(final_grid, sigma=1.5)
-    fig, ax = plt.subplots(figsize=(cols / 5, rows / 5), dpi=10)
+    blurred = gaussian_filter(final_grid, sigma=DOT_SIGMA)
+    fig, ax = plt.subplots(figsize=(v_width / 100, v_height / 100), dpi=100)
     ax.imshow(blurred, cmap='inferno', interpolation='bicubic', origin='lower',
-              extent=[0, cols, 0, rows], aspect='auto')
+              extent=[0, v_width, 0, v_height], aspect='auto')
     ax.axis('off')
     plt.tight_layout(pad=0)
     buf = BytesIO()
@@ -133,8 +139,8 @@ def generate_heatmap_video():
     plt.close(fig)
     buf.seek(0)
     heatmap = cv2.imdecode(np.frombuffer(buf.getvalue(), dtype=np.uint8), 1)
-    heatmap = cv2.resize(heatmap, (width, height))
-    black = np.zeros((height, width, 3), dtype=np.uint8)
+    heatmap = cv2.resize(heatmap, (v_width, v_height))
+    black = np.zeros((v_height, v_width, 3), dtype=np.uint8)
     final_frame = cv2.addWeighted(black, 1.0, heatmap, 1.0, 0)
 
     for _ in range(int(fps)):

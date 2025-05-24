@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import Foundation
 
 struct VideoBackgroundView: UIViewRepresentable {
     let player: AVPlayer
@@ -38,7 +39,7 @@ struct VideoBackgroundView: UIViewRepresentable {
 struct EyeTrackingView: View {
     @EnvironmentObject private var appState: AppState
 
-    private static let videoFileName = "backgroundVideo3"
+    private static let videoFileName = "backgroundVideo2"
 
     @State private var originalVideo = AVPlayer(url: Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4")!)
 
@@ -48,10 +49,10 @@ struct EyeTrackingView: View {
     @State private var lastPressTime: Date? = nil
     @State private var timeSinceLastPress: TimeInterval? = nil
     @State private var lastPressedId: Int? = nil
-    @State private var pressedCoordinates: (x: Int, y: Int)? = nil
+    @State private var pressedCoordinates: (x: CGFloat, y: CGFloat)? = nil
     @State private var videoTimestamp: Double = 0
     @State private var tapCounts: [Int: Int] = [:]
-    @State private var tapHistory: [(x: Int, y: Int, timestamp: Double)] = []
+    @State private var tapHistory: [(x: CGFloat, y: CGFloat, timestamp: Double)] = []
 
     @State private var currentTime: Double = 0
     @State private var sliderValue: Double = 0
@@ -63,8 +64,8 @@ struct EyeTrackingView: View {
     @State private var showHeatmapImage = false
     @State private var heatmapImage: UIImage? = nil
     @State private var isExporting = false
-
-    let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 50)
+    
+    @State private var serverIPAddress: String = ""
 
     var body: some View {
         GeometryReader { geometry in
@@ -84,32 +85,30 @@ struct EyeTrackingView: View {
                         .background(Color.black)
                 }
 
-                LazyVGrid(columns: columns, spacing: 0) {
-                    ForEach(0..<1400, id: \.self) { id in
-                        let row = id / 50
-                        let column = id % 50
-                        Rectangle()
-                            .stroke(Color.black.opacity(0.5), lineWidth: 0)
-                            .background(Color.clear)
-                            .frame(width: geometry.size.width / 50, height: geometry.size.width / 50)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(
+                        TapGesture()
+                            .onEnded { value in
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onEnded { value in
                                 guard !showHeatmapImage && !isPreparingHeatmap else { return }
+                                let location = value.location
                                 let now = Date()
                                 videoTimestamp = originalVideo.currentTime().seconds
                                 if let last = lastPressTime {
                                     timeSinceLastPress = now.timeIntervalSince(last)
                                 }
                                 lastPressTime = now
-                                lastPressedId = id
-                                pressedCoordinates = (x: column, y: row)
-                                tapCounts[id, default: 0] += 1
-                                tapHistory.append((x: column, y: row, timestamp: videoTimestamp))
+                                // pressedCoordinates are now precise
+                                pressedCoordinates = (x: location.x, y: location.y)
+                                tapHistory.append((x: location.x, y: location.y, timestamp: videoTimestamp))
                             }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .disabled(showHeatmapImage)
+                    )
+                    .allowsHitTesting(!showHeatmapImage && !isPreparingHeatmap)
 
                 if isPreparingHeatmap {
                     Color.black.opacity(0.6)
@@ -123,7 +122,7 @@ struct EyeTrackingView: View {
                 if isExporting {
                     Color.black.opacity(0.6)
                         .ignoresSafeArea()
-                    ProgressView("Exporting...")
+                    ProgressView("Exporting")
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         .foregroundColor(.white)
                         .scaleEffect(1.5)
@@ -137,6 +136,10 @@ struct EyeTrackingView: View {
                 .offset(x: -580, y: -300)
             }
             .onAppear {
+                if let ip = getWiFiAddress() {
+                    serverIPAddress = ip
+                }
+                
                 activeVideo = originalVideo
                 Task {
                     if let asset = originalVideo.currentItem?.asset {
@@ -164,7 +167,7 @@ struct EyeTrackingView: View {
                                                        queue: .main) { _ in
                     if !showHeatmapImage && !isPreparingHeatmap {
                         isPreparingHeatmap = true
-                        generateHeatmapVideo()
+                        generateHeatmapVideo(viewSize: geometry.size)
                     }
                 }
             }
@@ -173,17 +176,17 @@ struct EyeTrackingView: View {
                     HStack {
                         if !showHeatmapImage {
                             VStack(alignment: .leading, spacing: 4) {
-                                if let timeSinceLastPress = timeSinceLastPress,
-                                   let id = lastPressedId,
-                                   let coords = pressedCoordinates {
-                                    Text("Eye Tracking Data")
-                                        .font(.footnote).bold()
-                                    Text("ID: \(id) • Coordinates: (\(coords.x), \(coords.y))")
-                                        .font(.caption2)
-                                        .frame(width: 250, alignment: .leading)
-                                    Text("Timestamp: \(formatTimestamp(videoTimestamp)) • Since Last: \(formatTimestamp(timeSinceLastPress))")
-                                        .font(.system(size: 11))
-                                        .frame(width: 250, alignment: .leading)
+                                if let coords = pressedCoordinates {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Eye Tracking Data")
+                                            .font(.footnote).bold()
+                                        Text(String(format: "Coordinates: (%.1f, %.1f)", coords.x, coords.y))
+                                            .font(.caption2)
+                                            .frame(width: 250, alignment: .leading)
+                                        Text("Timestamp: \(formatTimestamp(videoTimestamp)) • Since Last: \(formatTimestamp(timeSinceLastPress ?? 0))")
+                                            .font(.system(size: 11))
+                                            .frame(width: 260, alignment: .leading)
+                                    }
                                 }
                             }
                         }
@@ -248,24 +251,29 @@ struct EyeTrackingView: View {
                             .font(.caption2)
                             .frame(width: fixedWidth, alignment: .trailing)
 
-
-                        
                         if heatmapExportedURL != nil {
                             Button {
                                 isExporting = true
                                 DispatchQueue.main.async {
                                     guard let exportedURL = heatmapExportedURL else { return }
-                                    let activityVC = UIActivityViewController(activityItems: [exportedURL], applicationActivities: nil)
-                                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                                       let window = windowScene.windows.first,
-                                       let rootVC = window.rootViewController {
-                                        activityVC.popoverPresentationController?.sourceView = window
-                                        activityVC.popoverPresentationController?.sourceRect = CGRect(x: window.bounds.midX,
-                                                                                                      y: window.bounds.midY,
-                                                                                                      width: 0,
-                                                                                                      height: 0)
-                                        activityVC.popoverPresentationController?.permittedArrowDirections = []
-                                        rootVC.present(activityVC, animated: true)
+
+                                    let clickData = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+                                    if let jsonData = try? JSONSerialization.data(withJSONObject: clickData, options: .prettyPrinted) {
+                                        let jsonURL = FileManager.default.temporaryDirectory.appendingPathComponent("clicks.json")
+                                        try? jsonData.write(to: jsonURL)
+
+                                        let activityVC = UIActivityViewController(activityItems: [exportedURL, jsonURL], applicationActivities: nil)
+                                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                           let window = windowScene.windows.first,
+                                           let rootVC = window.rootViewController {
+                                            activityVC.popoverPresentationController?.sourceView = window
+                                            activityVC.popoverPresentationController?.sourceRect = CGRect(x: window.bounds.midX,
+                                                                                                          y: window.bounds.midY,
+                                                                                                          width: 0,
+                                                                                                          height: 0)
+                                            activityVC.popoverPresentationController?.permittedArrowDirections = []
+                                            rootVC.present(activityVC, animated: true)
+                                        }
                                     }
                                     isExporting = false
                                 }
@@ -281,8 +289,8 @@ struct EyeTrackingView: View {
         }
     }
 
-    private func generateHeatmapVideo() {
-        guard let url = URL(string: "http://192.168.0.107:5050/generate_heatmap_video"),
+    private func generateHeatmapVideo(viewSize: CGSize) {
+        guard let url = URL(string: "http://192.168.160.217:5050/generate_heatmap_video"),
               let videoURL = Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4") else {
             print("Invalid URL or video file missing")
             return
@@ -290,7 +298,7 @@ struct EyeTrackingView: View {
 
         isPreparingHeatmap = true
 
-        let clicksPayload = tapHistory.map { ["row": $0.y, "col": $0.x, "timestamp": $0.timestamp] }
+        let clicksPayload = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
 
@@ -306,9 +314,9 @@ struct EyeTrackingView: View {
         data.append("\r\n".data(using: .utf8)!)
 
         data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"rows\"\r\n\r\n28\r\n".data(using: .utf8)!)
+        data.append("Content-Disposition: form-data; name=\"width\"\r\n\r\n\(Int(viewSize.width))\r\n".data(using: .utf8)!)
         data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"cols\"\r\n\r\n50\r\n".data(using: .utf8)!)
+        data.append("Content-Disposition: form-data; name=\"height\"\r\n\r\n\(Int(viewSize.height))\r\n".data(using: .utf8)!)
 
         let videoData = try! Data(contentsOf: videoURL)
         data.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -353,5 +361,31 @@ struct EyeTrackingView: View {
             return String(format: "%02d.%02d", secs, millis)
         }
     }
-
+    
+    func getWiFiAddress() -> String? {
+        var address: String?
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        if getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr {
+            var ptr = firstAddr
+            while ptr != nil {
+                let interface = ptr.pointee
+                let addrFamily = interface.ifa_addr.pointee.sa_family
+                if addrFamily == UInt8(AF_INET) {
+                    if let name = String(validatingUTF8: interface.ifa_name),
+                       name == "en0" { // Wi-Fi interface
+                        var addr = interface.ifa_addr.pointee
+                        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                        getnameinfo(&addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                                    &hostname, socklen_t(hostname.count),
+                                    nil, socklen_t(0), NI_NUMERICHOST)
+                        address = String(cString: hostname)
+                        break
+                    }
+                }
+                ptr = interface.ifa_next
+            }
+        }
+        freeifaddrs(ifaddr)
+        return address
+    }
 }
