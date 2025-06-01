@@ -13,6 +13,7 @@ struct TestView: View {
 
     @Environment(\.openImmersiveSpace) var openImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
 
     @State private var isLoadingEyeTracking = false
 
@@ -24,17 +25,49 @@ struct TestView: View {
                 .bold()
 
             HStack(spacing: 50){
-                VStack{
-                    Image(systemName: "character.cursor.ibeam")
-                        .font(.system(size: 50))
-                        .padding()
-                    
-                    Button("Typing") {
-                        appState.currentPage = .type
-                    }
+//                VStack{
+//                    Image(systemName: "character.cursor.ibeam")
+//                        .font(.system(size: 50))
+//                        .padding()
+//
+//                    Button("Typing") {
+//                        appState.currentPage = .type
+//                    }
+//
+//                }
+//                .frame(height: 150, alignment: .bottom)
+                
+                
+//                VStack{
+//                    Image(systemName: "point.topleft.down.to.point.bottomright.filled.curvepath")
+//                        .font(.system(size: 50))
+//                        .padding()
+//
+//                    Button("Drag") {
+//                        appState.currentPage = .reach
+//                        Task {
+//                            await openImmersiveSpace(id: "reachObject")
+//                        }
+//                    }
+//
+//                }
+//                .frame(height: 150, alignment: .bottom)
 
-                }
-                .frame(height: 150, alignment: .bottom)
+//                VStack{
+//                    Image(systemName: "dot.scope")
+//                        .font(.system(size: 50))
+//                        .padding()
+//
+//                    Button("Target") {
+//                        appState.currentPage = .select
+//                        Task {
+//                            await openImmersiveSpace(id: "selectionObject")
+//                        }
+//                    }
+//
+//                }
+//                .frame(height: 150, alignment: .bottom)
+                
                 
                 VStack{
                     Image(systemName: "cursorarrow.rays")
@@ -48,38 +81,19 @@ struct TestView: View {
                 }
                 .frame(height: 150, alignment: .bottom)
                 
-                VStack{
-                    Image(systemName: "point.topleft.down.to.point.bottomright.filled.curvepath")
-                        .font(.system(size: 50))
-                        .padding()
-                    
-                    Button("Drag") {
-                        appState.currentPage = .reach
-                        Task {
-                            await openImmersiveSpace(id: "reachObject")
-                        }
-                    }
-
-                }
-                .frame(height: 150, alignment: .bottom)
-
-                VStack{
-                    Image(systemName: "dot.scope")
-                        .font(.system(size: 50))
-                        .padding()
-                    
-                    Button("Target") {
-                        appState.currentPage = .select
-                        Task {
-                            await openImmersiveSpace(id: "selectionObject")
-                        }
-                    }
-
-                }
-                .frame(height: 150, alignment: .bottom)
+               VStack{
+                   Image(systemName: "scope")
+                       .font(.system(size: 45))
+                       .padding()
+                   
+                   Button("Percision") {
+                       appState.currentPage = .bullseyeTest
+                   }
+               }
+               .frame(height: 150, alignment: .bottom)
                 
                 VStack {
-                    Image(systemName: "circle.grid.3x3.fill")
+                    Image(systemName: "play.rectangle")
                         .font(.system(size: 50))
                         .padding()
 
@@ -93,21 +107,19 @@ struct TestView: View {
                 }
                 .frame(height: 150, alignment: .bottom)
                 
-//                VStack{
-//                    Image(systemName: "circle.hexagongrid.fill")
-//                        .font(.system(size: 50))
-//                        .padding()
-//                    
-//                    Button("Imersive Tracking") {
-//                        Task {
-//                            let result = await openImmersiveSpace(id: "immersiveTracking")
-//                            if result == .opened {
-//                                dismissWindow(id: "main")
-//                            }
-//                        }
-//                    }
-//                }
-//                .frame(height: 150, alignment: .bottom)
+                VStack{
+                    Image(systemName: "aqi.medium")
+                        .font(.system(size: 45))
+                        .padding()
+                    
+                    Button("Spacial Tracking") {
+                        Task{
+                            await openImmersiveSpace(id: "immersiveTracking")
+                            dismissWindow(id: "main")
+                        }
+                    }
+                }
+                .frame(height: 150, alignment: .bottom)
 
             }
         }

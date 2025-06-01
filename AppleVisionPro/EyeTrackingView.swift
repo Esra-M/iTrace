@@ -7,112 +7,61 @@
 
 import SwiftUI
 import AVFoundation
-import Foundation
-
-struct VideoBackgroundView: UIViewRepresentable {
-    let player: AVPlayer
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .clear
-
-        let playerLayer = AVPlayerLayer(player: player)
-        playerLayer.videoGravity = .resizeAspectFill
-        DispatchQueue.main.async {
-            playerLayer.frame = view.bounds
-        }
-
-        view.layer.addSublayer(playerLayer)
-        playerLayer.frame = view.bounds
-
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        if let playerLayer = uiView.layer.sublayers?.first as? AVPlayerLayer {
-            playerLayer.player = player
-            playerLayer.frame = uiView.bounds
-        }
-    }
-}
 
 struct EyeTrackingView: View {
     @EnvironmentObject private var appState: AppState
-
-    private static let videoFileName = "backgroundVideo2"
-
+    
+    private static let videoFileName = "backgroundVideo1"
     @State private var originalVideo = AVPlayer(url: Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4")!)
-
-    @State private var activeVideo: AVPlayer? = nil
-    @State private var heatmapExportedURL: URL? = nil
-
-    @State private var lastPressTime: Date? = nil
-    @State private var timeSinceLastPress: TimeInterval? = nil
-    @State private var lastPressedId: Int? = nil
-    @State private var pressedCoordinates: (x: CGFloat, y: CGFloat)? = nil
+    @State private var activeVideo: AVPlayer?
+    @State private var heatmapExportedURL: URL?
+    @State private var lastPressTime: Date?
+    @State private var pressedCoordinates: (x: CGFloat, y: CGFloat)?
     @State private var videoTimestamp: Double = 0
-    @State private var tapCounts: [Int: Int] = [:]
     @State private var tapHistory: [(x: CGFloat, y: CGFloat, timestamp: Double)] = []
-
     @State private var currentTime: Double = 0
     @State private var sliderValue: Double = 0
     @State private var displayedTime: Double = 0
     @State private var duration: Double = 0
-
     @State private var isPreparingHeatmap = false
     @State private var isPlaying = false
-    @State private var showHeatmapImage = false
-    @State private var heatmapImage: UIImage? = nil
     @State private var isExporting = false
+    @State private var timeObserver: Any?
+    @State private var timeObserverPlayer: AVPlayer?
+    @State private var viewSize: CGSize = .zero
     
-    @State private var serverIPAddress: String = ""
+    private var isHeatmapDisplayMode: Bool { appState.eyeTrackingMode == .heatmapDisplay }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if let player = activeVideo, !showHeatmapImage {
+                if let player = activeVideo {
                     VideoBackgroundView(player: player)
                         .colorMultiply(.white)
                         .ignoresSafeArea()
                         .disabled(true)
                 }
 
-                if showHeatmapImage, let image = heatmapImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .ignoresSafeArea()
-                        .background(Color.black)
-                }
-
                 Color.clear
                     .contentShape(Rectangle())
-                    .gesture(
-                        TapGesture()
-                            .onEnded { value in
-                            }
-                    )
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 0)
                             .onEnded { value in
-                                guard !showHeatmapImage && !isPreparingHeatmap else { return }
+                                guard !isPreparingHeatmap && !isHeatmapDisplayMode else { return }
                                 let location = value.location
-                                let now = Date()
                                 videoTimestamp = originalVideo.currentTime().seconds
-                                if let last = lastPressTime {
-                                    timeSinceLastPress = now.timeIntervalSince(last)
-                                }
-                                lastPressTime = now
-                                // pressedCoordinates are now precise
+                                lastPressTime = Date()
                                 pressedCoordinates = (x: location.x, y: location.y)
                                 tapHistory.append((x: location.x, y: location.y, timestamp: videoTimestamp))
+                                
+                                // Print click coordinates and timestamp
+                                print("Clicked at (\(location.x), \(location.y)) at time \(videoTimestamp)")
                             }
                     )
-                    .allowsHitTesting(!showHeatmapImage && !isPreparingHeatmap)
+                    .allowsHitTesting(!isPreparingHeatmap)
 
                 if isPreparingHeatmap {
-                    Color.black.opacity(0.6)
-                        .ignoresSafeArea()
+                    Color.black.opacity(0.6).ignoresSafeArea()
                     ProgressView("Generating heatmap")
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         .foregroundColor(.white)
@@ -120,83 +69,46 @@ struct EyeTrackingView: View {
                 }
 
                 if isExporting {
-                    Color.black.opacity(0.6)
-                        .ignoresSafeArea()
+                    Color.black.opacity(0.6).ignoresSafeArea()
                     ProgressView("Exporting")
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         .foregroundColor(.white)
                         .scaleEffect(1.5)
                 }
 
-                Button(action: { appState.currentPage = .test }) {
-                    Image(systemName: "chevron.backward")
-                        .padding()
+                Button(action: {
+                    appState.eyeTrackingMode = .normal
+                    appState.currentPage = .test
+                }) {
+                    Image(systemName: "chevron.backward").padding()
                 }
                 .clipShape(Circle())
                 .offset(x: -580, y: -300)
             }
             .onAppear {
-                if let ip = getWiFiAddress() {
-                    serverIPAddress = ip
-                }
-                
-                activeVideo = originalVideo
-                Task {
-                    if let asset = originalVideo.currentItem?.asset {
-                        do {
-                            let dur = try await asset.load(.duration)
-                            duration = dur.seconds
-                        } catch {
-                            print("Failed to load duration: \(error)")
-                        }
-                    }
-                }
-
-                Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                    if let video = activeVideo {
-                        currentTime = video.currentTime().seconds
-                        if isPlaying {
-                            sliderValue = currentTime
-                            displayedTime = currentTime
-                        }
-                    }
-                }
-
-                NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
-                                                       object: originalVideo.currentItem,
-                                                       queue: .main) { _ in
-                    if !showHeatmapImage && !isPreparingHeatmap {
-                        isPreparingHeatmap = true
-                        generateHeatmapVideo(viewSize: geometry.size)
-                    }
-                }
+                viewSize = geometry.size
+                setupVideo()
+            }
+            .onDisappear { cleanupPlayer() }
+            .onChange(of: geometry.size) { _, newSize in viewSize = newSize }
+            .onChange(of: appState.eyeTrackingMode) { _, newMode in
+                newMode == .heatmapDisplay ? setupHeatmapVideo() : setupNormalVideo()
             }
             .toolbar {
                 ToolbarItemGroup(placement: .bottomOrnament) {
                     HStack {
-                        if !showHeatmapImage {
+                        if !isHeatmapDisplayMode && originalVideo == activeVideo, let coords = pressedCoordinates {
                             VStack(alignment: .leading, spacing: 4) {
-                                if let coords = pressedCoordinates {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Eye Tracking Data")
-                                            .font(.footnote).bold()
-                                        Text(String(format: "Coordinates: (%.1f, %.1f)", coords.x, coords.y))
-                                            .font(.caption2)
-                                            .frame(width: 250, alignment: .leading)
-                                        Text("Timestamp: \(formatTimestamp(videoTimestamp)) • Since Last: \(formatTimestamp(timeSinceLastPress ?? 0))")
-                                            .font(.system(size: 11))
-                                            .frame(width: 260, alignment: .leading)
-                                    }
-                                }
+                                Text("Eye Tracking Data").font(.footnote).bold()
+                                Text(String(format: "Coordinates: (%.1f, %.1f)", coords.x, coords.y))
+                                    .font(.caption2).frame(width: 250, alignment: .leading)
+                                Text("Timestamp: \(formatTimestamp(videoTimestamp))")
+                                    .font(.system(size: 11)).frame(width: 260, alignment: .leading)
                             }
                         }
-
+                        
                         Button {
-                            if isPlaying {
-                                activeVideo?.pause()
-                            } else {
-                                activeVideo?.play()
-                            }
+                            isPlaying ? activeVideo?.pause() : activeVideo?.play()
                             isPlaying.toggle()
                         } label: {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
@@ -210,9 +122,7 @@ struct EyeTrackingView: View {
                             } else {
                                 let time = CMTime(seconds: sliderValue, preferredTimescale: 600)
                                 video.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-                                if isPlaying {
-                                    video.play()
-                                }
+                                if isPlaying { video.play() }
                             }
                         })
                         .onChange(of: sliderValue) { oldValue, newValue in
@@ -224,59 +134,13 @@ struct EyeTrackingView: View {
                         }
                         .frame(width: 300)
                         
-                        let needsHour = Int(duration) >= 3600
-
-                        let fixedWidth: CGFloat = {
-                            if needsHour {
-                                return 150
-                            } else {
-                                return 100
-                            }
-                        }()
-
-                        let formatTime: (Double) -> String = { seconds in
-                            let totalSecs = Int(seconds)
-                            let hrs = totalSecs / 3600
-                            let mins = (totalSecs % 3600) / 60
-                            let secs = totalSecs % 60
-
-                            if needsHour {
-                                return String(format: "%02d:%02d:%02d", hrs, mins, secs)
-                            } else {
-                                return String(format: "%02d:%02d", mins, secs)
-                            }
-                        }
-
                         Text("\(formatTime(sliderValue)) / \(formatTime(duration))")
                             .font(.caption2)
-                            .frame(width: fixedWidth, alignment: .trailing)
+                            .frame(width: duration >= 3600 ? 150 : 100, alignment: .trailing)
 
-                        if heatmapExportedURL != nil {
+                        if (isHeatmapDisplayMode && appState.heatmapVideoURL != nil) || heatmapExportedURL != nil {
                             Button {
-                                isExporting = true
-                                DispatchQueue.main.async {
-                                    guard let exportedURL = heatmapExportedURL else { return }
-
-                                    let clickData = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
-                                    if let jsonData = try? JSONSerialization.data(withJSONObject: clickData, options: .prettyPrinted) {
-                                        let jsonURL = FileManager.default.temporaryDirectory.appendingPathComponent("clicks.json")
-                                        try? jsonData.write(to: jsonURL)
-
-                                        let activityVC = UIActivityViewController(activityItems: [exportedURL, jsonURL], applicationActivities: nil)
-                                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                                           let window = windowScene.windows.first,
-                                           let rootVC = window.rootViewController {
-                                            activityVC.popoverPresentationController?.sourceView = window
-                                            activityVC.popoverPresentationController?.sourceRect = CGRect(x: window.bounds.midX,
-                                                                                                          y: window.bounds.midY,
-                                                                                                          width: 0,
-                                                                                                          height: 0)
-                                            activityVC.popoverPresentationController?.permittedArrowDirections = []
-                                            rootVC.present(activityVC, animated: true)
-                                        }
-                                    }
-                                    isExporting = false
-                                }
+                                exportVideo()
                             } label: {
                                 Label("Download", systemImage: "arrow.down.to.line.alt")
                             }
@@ -288,104 +152,261 @@ struct EyeTrackingView: View {
             }
         }
     }
+    
+    private func setupVideo() {
+        isHeatmapDisplayMode ? setupHeatmapVideo() : setupNormalVideo()
+    }
+    
+    private func setupNormalVideo() {
+        cleanupPlayerObserver()
+        activeVideo = originalVideo
+        setupPlayerObserver()
+        loadDuration()
+        
+        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
+                                               object: originalVideo.currentItem,
+                                               queue: .main) { _ in
+            if !isPreparingHeatmap && !isHeatmapDisplayMode {
+                isPreparingHeatmap = true
+                print("Starting heatmap video generation...")
+                generateHeatmapVideo()
+            }
+        }
+    }
+    
+    private func setupHeatmapVideo() {
+        guard let heatmapURL = appState.heatmapVideoURL else { return }
+        cleanupPlayerObserver()
+        activeVideo = AVPlayer(url: heatmapURL)
+        setupPlayerObserver()
+        loadDuration()
+        activeVideo?.play()
+        isPlaying = true
+    }
+    
+    private func setupPlayerObserver() {
+        guard let player = activeVideo else { return }
+        let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+            currentTime = time.seconds
+            if isPlaying && !time.seconds.isNaN && time.seconds.isFinite {
+                sliderValue = min(time.seconds, duration)
+                displayedTime = sliderValue
+            }
+        }
+        timeObserverPlayer = player
+    }
+    
+    private func cleanupPlayerObserver() {
+        if let observer = timeObserver, let player = timeObserverPlayer {
+            player.removeTimeObserver(observer)
+            timeObserver = nil
+            timeObserverPlayer = nil
+        }
+    }
+    
+    private func cleanupPlayer() {
+        cleanupPlayerObserver()
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    private func loadDuration() {
+        Task {
+            if let asset = activeVideo?.currentItem?.asset {
+                do {
+                    let dur = try await asset.load(.duration)
+                    await MainActor.run { duration = dur.seconds }
+                } catch {
+                    print("Failed to load duration: \(error)")
+                }
+            }
+        }
+    }
 
-    private func generateHeatmapVideo(viewSize: CGSize) {
-        guard let url = URL(string: "http://192.168.160.217:5050/generate_heatmap_video"),
+    private func generateHeatmapVideo() {
+        guard let url = URL(string: "http://\(appState.serverIPAddress):5050/generate_heatmap"),
               let videoURL = Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4") else {
             print("Invalid URL or video file missing")
+            isPreparingHeatmap = false
             return
         }
-
-        isPreparingHeatmap = true
-
-        let clicksPayload = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+        
+        let clicksPayload = tapHistory.map { ["x": Double($0.x), "y": Double($0.y), "timestamp": $0.timestamp] }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-
+        request.timeoutInterval = 300.0
+        
         let boundary = "Boundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-
+        
         var data = Data()
-
-        let jsonData = try! JSONSerialization.data(withJSONObject: clicksPayload)
-        data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"clicks\"\r\n\r\n".data(using: .utf8)!)
-        data.append(jsonData)
-        data.append("\r\n".data(using: .utf8)!)
-
-        data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"width\"\r\n\r\n\(Int(viewSize.width))\r\n".data(using: .utf8)!)
-        data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"height\"\r\n\r\n\(Int(viewSize.height))\r\n".data(using: .utf8)!)
-
-        let videoData = try! Data(contentsOf: videoURL)
-        data.append("--\(boundary)\r\n".data(using: .utf8)!)
-        data.append("Content-Disposition: form-data; name=\"video\"; filename=\"video.mp4\"\r\n".data(using: .utf8)!)
-        data.append("Content-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
-        data.append(videoData)
-        data.append("\r\n".data(using: .utf8)!)
-        data.append("--\(boundary)--\r\n".data(using: .utf8)!)
-
-        request.httpBody = data
-
-        URLSession.shared.uploadTask(with: request, from: data) { data, response, error in
+        
+        // Add form data
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: clicksPayload)
+            data.append(formData(boundary: boundary, name: "clicks", value: jsonData))
+        } catch {
+            print("Error serializing click data: \(error)")
+            isPreparingHeatmap = false
+            return
+        }
+        
+        data.append(formData(boundary: boundary, name: "width", value: "\(Int(viewSize.width))"))
+        data.append(formData(boundary: boundary, name: "height", value: "\(Int(viewSize.height))"))
+        
+        // Add video file
+        do {
+            let videoData = try Data(contentsOf: videoURL)
+            data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"video\"; filename=\"\(Self.videoFileName).mp4\"\r\nContent-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
+            data.append(videoData)
+            data.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        } catch {
+            print("Error reading video file: \(error)")
+            isPreparingHeatmap = false
+            return
+        }
+        
+        URLSession.shared.uploadTask(with: request, from: data) { responseData, response, error in
             DispatchQueue.main.async {
-                isPreparingHeatmap = false
-                if let data = data {
-                    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("heatmap_video.mp4")
-                    try? data.write(to: tempURL)
+                self.isPreparingHeatmap = false
+                
+                if let error = error {
+                    print("Network error: \(error.localizedDescription)")
+                    return
+                }
+                
+                guard let responseData = responseData else {
+                    print("No response data received")
+                    return
+                }
+                                
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("heatmap_video.mp4")
+                
+                do {
+                    try responseData.write(to: tempURL)
+                    print("Heatmap video generated")
+                    
+                    self.cleanupPlayerObserver()
                     self.heatmapExportedURL = tempURL
                     self.activeVideo = AVPlayer(url: tempURL)
+                    self.setupPlayerObserver()
                     self.activeVideo?.play()
                     self.isPlaying = true
-                    self.showHeatmapImage = false
-                } else {
-                    print("Error:", error?.localizedDescription ?? "Unknown")
+                } catch {
+                    print("Error saving heatmap video: \(error)")
                 }
             }
         }.resume()
     }
     
-    let formatTimestamp: (Double) -> String = { seconds in
+    private func formData(boundary: String, name: String, value: String) -> Data {
+        return "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!
+    }
+    
+    private func formData(boundary: String, name: String, value: Data) -> Data {
+        var data = Data()
+        data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+        data.append(value)
+        data.append("\r\n".data(using: .utf8)!)
+        return data
+    }
+    
+    private func exportVideo() {
+        isExporting = true
+        let videoURL = isHeatmapDisplayMode ? appState.heatmapVideoURL : heatmapExportedURL
+        let clickData = isHeatmapDisplayMode ?
+            appState.clickData.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] } :
+            tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+        
+        guard let exportedURL = videoURL else {
+            isExporting = false
+            return
+        }
+        
+        var itemsToShare: [Any] = [exportedURL]
+        
+        if !clickData.isEmpty,
+           let jsonData = try? JSONSerialization.data(withJSONObject: clickData, options: .prettyPrinted) {
+            let jsonURL = FileManager.default.temporaryDirectory.appendingPathComponent("clicks.json")
+            try? jsonData.write(to: jsonURL)
+            itemsToShare.append(jsonURL)
+        }
+        
+        let activityVC = UIActivityViewController(activityItems: itemsToShare, applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootVC = window.rootViewController {
+            activityVC.popoverPresentationController?.sourceView = window
+            activityVC.popoverPresentationController?.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+            activityVC.popoverPresentationController?.permittedArrowDirections = []
+            rootVC.present(activityVC, animated: true)
+        }
+        isExporting = false
+    }
+    
+    private func formatTime(_ seconds: Double) -> String {
+        let totalSecs = Int(seconds)
+        let hrs = totalSecs / 3600
+        let mins = (totalSecs % 3600) / 60
+        let secs = totalSecs % 60
+        return hrs > 0 ? String(format: "%02d:%02d:%02d", hrs, mins, secs) : String(format: "%02d:%02d", mins, secs)
+    }
+    
+    private func formatTimestamp(_ seconds: Double) -> String {
         let totalMillis = Int(seconds * 1000)
-        let hrs = totalMillis / (3600 * 1000)
-        let mins = (totalMillis % (3600 * 1000)) / (60 * 1000)
-        let secs = (totalMillis % (60 * 1000)) / 1000
+        let mins = totalMillis / 60000
+        let secs = (totalMillis % 60000) / 1000
         let millis = (totalMillis % 1000) / 10
+        return mins > 0 ? String(format: "%02d:%02d.%02d", mins, secs, millis) : String(format: "%02d.%02d", secs, millis)
+    }
+}
 
-        if hrs > 0 {
-            return String(format: "%02d:%02d:%02d.%02d", hrs, mins, secs, millis)
-        } else if mins > 0 {
-            return String(format: "%02d:%02d.%02d", mins, secs, millis)
-        } else {
-            return String(format: "%02d.%02d", secs, millis)
+struct VideoBackgroundView: UIViewRepresentable {
+    let player: AVPlayer
+    
+    func makeUIView(context: Context) -> PlayerView {
+        let playerView = PlayerView()
+        playerView.player = player
+        return playerView
+    }
+
+    func updateUIView(_ uiView: PlayerView, context: Context) {
+        if uiView.player != player {
+            uiView.player = player
+        }
+    }
+}
+
+class PlayerView: UIView {
+    var player: AVPlayer? {
+        didSet {
+            playerLayer.player = player
         }
     }
     
-    func getWiFiAddress() -> String? {
-        var address: String?
-        var ifaddr: UnsafeMutablePointer<ifaddrs>?
-        if getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr {
-            var ptr = firstAddr
-            while ptr != nil {
-                let interface = ptr.pointee
-                let addrFamily = interface.ifa_addr.pointee.sa_family
-                if addrFamily == UInt8(AF_INET) {
-                    if let name = String(validatingUTF8: interface.ifa_name),
-                       name == "en0" { // Wi-Fi interface
-                        var addr = interface.ifa_addr.pointee
-                        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                        getnameinfo(&addr, socklen_t(interface.ifa_addr.pointee.sa_len),
-                                    &hostname, socklen_t(hostname.count),
-                                    nil, socklen_t(0), NI_NUMERICHOST)
-                        address = String(cString: hostname)
-                        break
-                    }
-                }
-                ptr = interface.ifa_next
-            }
-        }
-        freeifaddrs(ifaddr)
-        return address
+    override class var layerClass: AnyClass {
+        return AVPlayerLayer.self
+    }
+    
+    var playerLayer: AVPlayerLayer {
+        return layer as! AVPlayerLayer
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer.frame = bounds
+        playerLayer.videoGravity = .resizeAspectFill
+    }
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        playerLayer.videoGravity = .resizeAspectFill
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .clear
+        playerLayer.videoGravity = .resizeAspectFill
     }
 }

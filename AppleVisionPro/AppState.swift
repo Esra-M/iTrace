@@ -18,9 +18,21 @@ class AppState: ObservableObject {
         case reach
         case select
         case eyeTracking
+        case bullseyeTest
     }
-
+    
+    enum EyeTrackingMode {
+        case normal
+        case heatmapDisplay
+    }
     @Published var currentPage: WindowPage = .test
+    
+    @Published var serverIPAddress: String = "192.168.160.217"
+
+    @Published var clickData: [ClickData] = []
+    @Published var heatmapVideoURL: URL?
+    @Published var eyeTrackingMode: EyeTrackingMode = .normal
+
     @Published var reachResult: String = ""
 }
 

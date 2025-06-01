@@ -1,21 +1,12 @@
-//
-//  AppleVisionProApp.swift
-//  AppleVisionPro
-//
-//  Created by Esra Mehmedova on 19.04.25.
-//
-
 import SwiftUI
 import RealityKit
 import RealityKitContent
-
 
 @main
 struct AppleVisionProApp: App {
     @StateObject private var appState = AppState()
 
     var body: some SwiftUI.Scene {
-        
         WindowGroup(id: "main") {
             Group {
                 switch appState.currentPage {
@@ -36,28 +27,29 @@ struct AppleVisionProApp: App {
                 case .eyeTracking:
                     EyeTrackingView()
                         .frame(
-                        minWidth: 1280, maxWidth: 1280,
-                        minHeight: 720, maxHeight: 720)
+                            minWidth: 1280, maxWidth: 1280,
+                            minHeight: 720, maxHeight: 720)
+                case .bullseyeTest:
+                    BullseyeTestView()
                 }
             }
             .environmentObject(appState)
             .animation(.easeInOut, value: appState.currentPage)
         }
-        
-        ImmersiveSpace(id: "immersiveTracking"){
-            ImersiveTrackingView()
+
+        ImmersiveSpace(id: "immersiveTracking") {
+            ImmersiveTrackingView()
+                .environmentObject(appState)
         }
+        .windowStyle(.plain)
         
-        
-        ImmersiveSpace(id: "selectionObject"){
+
+        ImmersiveSpace(id: "selectionObject") {
             SelectionObjectsView()
         }
-        
-        ImmersiveSpace(id: "reachObject"){
+        ImmersiveSpace(id: "reachObject") {
             ReachObjectView()
                 .environmentObject(appState)
         }
-
     }
 }
-
