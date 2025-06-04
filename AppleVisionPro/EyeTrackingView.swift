@@ -32,6 +32,11 @@ struct EyeTrackingView: View {
     @State private var videoSize: CGSize = .zero
     @State private var videoRect: CGRect = .zero
     
+    @State private var backButtonPressProgress: CGFloat = 0
+    @State private var backButtonTimer: Timer?
+    @State private var isBackButtonPressed = false
+    
+    private let backButtonPressDuration: Double = 2.0
     private var isHeatmapDisplayMode: Bool { appState.eyeTrackingMode == .heatmapDisplay }
 
     var body: some View {
@@ -95,14 +100,36 @@ struct EyeTrackingView: View {
                         .scaleEffect(1.5)
                 }
 
-                Button(action: {
-                    activeVideo?.pause()
-                    appState.eyeTrackingMode = .normal
-                    appState.currentPage = .test
-                }) {
-                    Image(systemName: "chevron.backward").padding()
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.3), lineWidth: 3)
+                        .frame(width: 50, height: 50)
+                    
+                    Circle()
+                        .trim(from: 0, to: backButtonPressProgress)
+                        .stroke(Color.white, lineWidth: 3)
+                        .frame(width: 50, height: 50)
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 0.1), value: backButtonPressProgress)
+                    
+                    Button(action: {}) {
+                        Image(systemName: "chevron.backward")
+                            .foregroundColor(.white)
+                            .font(.title2)
+                    }
+                    .frame(width: 44, height: 44)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if !isBackButtonPressed {
+                                    startBackButtonPress()
+                                }
+                            }
+                            .onEnded { _ in
+                                stopBackButtonPress()
+                            }
+                    )
                 }
-                .clipShape(Circle())
                 .offset(x: -580, y: -300)
             }
             .onAppear {
@@ -110,7 +137,10 @@ struct EyeTrackingView: View {
                 setupVideo()
                 loadVideoSize()
             }
-            .onDisappear { cleanupPlayer() }
+            .onDisappear {
+                cleanupPlayer()
+                stopBackButtonPress()
+            }
             .onChange(of: geometry.size) { _, newSize in
                 viewSize = newSize
                 calculateVideoRect()
@@ -185,6 +215,29 @@ struct EyeTrackingView: View {
                 }
             }
         }
+    }
+    
+    private func startBackButtonPress() {
+        isBackButtonPressed = true
+        backButtonPressProgress = 0
+        
+        backButtonTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            backButtonPressProgress += 0.05 / backButtonPressDuration
+            
+            if backButtonPressProgress >= 1.0 {
+                activeVideo?.pause()
+                appState.eyeTrackingMode = .normal
+                appState.currentPage = .test
+                stopBackButtonPress()
+            }
+        }
+    }
+    
+    private func stopBackButtonPress() {
+        isBackButtonPressed = false
+        backButtonTimer?.invalidate()
+        backButtonTimer = nil
+        backButtonPressProgress = 0
     }
     
     

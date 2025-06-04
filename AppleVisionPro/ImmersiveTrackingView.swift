@@ -27,9 +27,14 @@ struct ImmersiveTrackingView: View {
     @State private var recordingStartTime: Date?
     @State private var clickDataArray: [ClickData] = []
     @State private var isGeneratingHeatmap = false
-    @State private var screenResolution: CGSize = CGSize(width: 3600, height: 2338) // Default fallback
+    @State private var screenResolution: CGSize = CGSize(width: 3600, height: 2338)
     
-    // Calculate frame size based on percentages of Mac screen resolution
+    @State private var stopButtonPressProgress: CGFloat = 0
+    @State private var stopButtonTimer: Timer?
+    @State private var isStopButtonPressed = false
+    
+    private let stopButtonPressDuration: Double = 2.0
+    
     private var frameSize: CGSize {
         CGSize(
             width: screenResolution.width * 0.911,
@@ -113,13 +118,13 @@ struct ImmersiveTrackingView: View {
                                         .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isRecording)
                                     
                                     Text("RECORDING...")
-                                        .font(.title2)
+                                        .font(.largeTitle)
                                         .fontWeight(.bold)
                                     
                                     let minutes = Int(counterValue) / 60
                                     let seconds = counterValue.truncatingRemainder(dividingBy: 60)
                                     Text(String(format: "%02d.%05.2f", minutes, seconds))
-                                        .font(.title2)
+                                        .font(.largeTitle)
                                         .fontWeight(.bold)
                                         .monospacedDigit()
                                 }
@@ -127,33 +132,82 @@ struct ImmersiveTrackingView: View {
                                 .padding(.vertical, 15)
                                 .background(RoundedRectangle(cornerRadius: 15).fill(.ultraThinMaterial))
                                 
-                                Button(action: stopScreenRecording) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "stop.circle.fill")
-                                            .font(.title2)
-                                        Text("STOP")
-                                            .font(.title2)
-                                            .fontWeight(.bold)
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 25)
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 3)
+                                        .frame(width: 185, height: 80)
+                                    
+                                    RoundedRectangle(cornerRadius: 25)
+                                        .trim(from: 0, to: stopButtonPressProgress)
+                                        .stroke(Color.white, lineWidth: 3)
+                                        .frame(width: 80, height: 185)
+                                        .rotationEffect(.degrees(-90))
+                                        .animation(.linear(duration: 0.1), value: stopButtonPressProgress)
+                                    
+                                    Button(action: {}) {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "stop.circle.fill")
+                                                .font(.largeTitle)
+                                            Text("STOP")
+                                                .font(.largeTitle)
+                                                .fontWeight(.bold)
+                                        }
+                                        .padding(.horizontal, 25)
+                                        .padding(.vertical, 15)
+                                        .background(RoundedRectangle(cornerRadius: 15).fill(.ultraThinMaterial))
                                     }
-                                    .padding(.horizontal, 25)
-                                    .padding(.vertical, 15)
-                                    .background(RoundedRectangle(cornerRadius: 15).fill(.ultraThinMaterial))
+                                    .buttonStyle(PlainButtonStyle())
+                                    .simultaneousGesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { _ in
+                                                if !isStopButtonPressed {
+                                                    startStopButtonPress()
+                                                }
+                                            }
+                                            .onEnded { _ in
+                                                stopStopButtonPress()
+                                            }
+                                    )
                                 }
-                                .buttonStyle(PlainButtonStyle())
                             }
-                            .padding(.top, 50)
+                            .padding(.top, 100)
                         } else {
                             Spacer()
-                            Button(action: startScreenRecording) {
-                                HStack(spacing: 30) {
-                                    Image(systemName: "record.circle")
-                                        .font(.system(size: 80))
-                                    Text("START RECORDING")
-                                        .font(.largeTitle)
-                                        .fontWeight(.bold)
+                            VStack{
+                                Button(action: {
+                                    Task {
+                                        await MainActor.run {
+                                            appState.currentPage = .test
+                                        }
+                                        await dismissImmersiveSpace()
+                                        openWindow(id: "main")
+                                    }
+                                }) {
+                                    Image(systemName: "chevron.backward")
+                                        .font(.system(size: 24))
+                                        .padding()
                                 }
-                                .padding(40)
+                                .clipShape(Circle())
+                                .offset(x: -290, y: 10)
+                                
+                                Text("Before you start, anable View Mirroring")
+                                    .font(.largeTitle)
+                                    .padding(60)
+                                
+                                Button(action: startScreenRecording) {
+                                    HStack(spacing: 20) {
+                                        Image(systemName: "record.circle")
+                                            .font(.system(size: 40))
+                                        Text("START")
+                                            .font(.largeTitle)
+                                            .fontWeight(.bold)
+                                    }
+                                    .padding(20)
+                                }
+                                .padding(20)
                             }
+                            .frame(width: 700, height: 400)
+                            .glassBackgroundEffect()
                         }
                         Spacer()
                     }
@@ -166,9 +220,33 @@ struct ImmersiveTrackingView: View {
                 await fetchScreenResolution()
             }
         }
+        .onDisappear {
+            stopStopButtonPress()
+        }
 //        .onDisappear {
 //            if isRecording { stopScreenRecording() }
 //        }
+    }
+    
+    private func startStopButtonPress() {
+        isStopButtonPressed = true
+        stopButtonPressProgress = 0
+        
+        stopButtonTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            stopButtonPressProgress += 0.05 / stopButtonPressDuration
+            
+            if stopButtonPressProgress >= 1.0 {
+                stopScreenRecording()
+                stopStopButtonPress()
+            }
+        }
+    }
+    
+    private func stopStopButtonPress() {
+        isStopButtonPressed = false
+        stopButtonTimer?.invalidate()
+        stopButtonTimer = nil
+        stopButtonPressProgress = 0
     }
     
     private func fetchScreenResolution() async {
@@ -236,7 +314,7 @@ struct ImmersiveTrackingView: View {
     }
     
     private func sendStartRecordingRequest() async {
-        guard let url = URL(string: "http://\(appState.serverIPAddress)/start_recording") else { return }
+        guard let url = URL(string: "http://\(appState.serverIPAddress)/start_recordin") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
