@@ -1,11 +1,8 @@
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import numpy as np
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
-from io import BytesIO
-from scipy.ndimage import gaussian_filter
 import cv2
 import tempfile
 import os
@@ -18,28 +15,162 @@ import threading
 app = Flask(__name__)
 CORS(app)
 
-# Global variables
 current_recording_process = None
 current_recording_filepath = None
 OUTPUT_DIR = os.path.expanduser("~/Desktop/HeatmapRecordings")
 
+def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
+    # Reduce video quality for faster processing
+    try:
+        cap = cv2.VideoCapture(input_path)
+        w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        
+        scale = min(min(max_width / w, max_height / h), 1.0)
+        new_w, new_h = int(w * scale) & ~1, int(h * scale) & ~1
+        
+        if scale >= 0.95: return input_path, 1.0, 1.0
+        
+        reduced_path = input_path.replace('.mp4', '_reduced.mp4')
+        cmd = ['ffmpeg', '-i', input_path, '-vf', f'scale={new_w}:{new_h}',
+               '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', str(crf), '-an', '-y', reduced_path]
+        
+        if subprocess.run(cmd, capture_output=True).returncode == 0:
+            return reduced_path, new_w / w, new_h / h
+        return input_path, 1.0, 1.0
+    except:
+        return input_path, 1.0, 1.0
+
+def create_heatmap_overlay(brightness_grid, video_width, video_height, base_sigma=40, base_resolution=1920):
+    # Create heatmap overlay using OpenCV with resolution-scaled sigma
+    if np.sum(brightness_grid) == 0: return None
+    
+    resolution_scale = video_width / base_resolution
+    scaled_sigma = base_sigma * resolution_scale
+    
+    scaled_sigma = max(scaled_sigma, 5.0)
+    
+    blurred = cv2.GaussianBlur(brightness_grid.astype(np.float32), (0, 0), scaled_sigma)
+    if np.max(blurred) > 0:
+        blurred = (blurred / np.max(blurred) * 255).astype(np.uint8)
+    return cv2.applyColorMap(blurred, cv2.COLORMAP_INFERNO)
+
+def generate_heatmap(video_path, click_data):
+    # Generate heatmap video from click data
+    try:
+        print("Processing video...")
+        reduced_path, scale_x, scale_y = reduce_video_quality(video_path)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        output_path = os.path.join(OUTPUT_DIR, f"heatmap_{timestamp}.mp4")
+        
+        cap = cv2.VideoCapture(reduced_path)
+        if not cap.isOpened(): return None
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+        fade_duration = int(fps * 0.3)
+        
+        # Process clicks and create brightness grid
+        brightness_per_frame = np.zeros((frame_count, h, w), dtype=np.float32)
+        
+        for click in click_data:
+            x, y = int(float(click["x"]) * w), int(float(click["y"]) * h)
+            x, y = min(max(x, 0), w - 1), min(max(y, 0), h - 1)
+            
+            start_frame = max(0, int((click["timestamp"] * fps) - fade_duration))
+            end_frame = min(start_frame + fade_duration * 2, frame_count)
+            
+            frame_range = np.arange(start_frame, end_frame)
+            fade_in = frame_range < start_frame + fade_duration
+            fade_out = frame_range >= end_frame - fade_duration
+            
+            brightness = np.ones_like(frame_range, dtype=np.float32)
+            brightness[fade_in] = (frame_range[fade_in] - start_frame) / fade_duration
+            brightness[fade_out] = (end_frame - frame_range[fade_out]) / fade_duration
+            
+            brightness_per_frame[frame_range, y, x] += brightness
+        
+        # Normalize brightness
+        max_brightness = np.max(brightness_per_frame)
+        if max_brightness > 1.0:
+            brightness_per_frame = np.sqrt(brightness_per_frame / max_brightness)
+        
+        # Process frames
+        batch_size = 50 if w * h < 1000000 else 25
+        for i in range(0, frame_count, batch_size):
+            batch_end = min(i + batch_size, frame_count)
+            
+            for j in range(i, batch_end):
+                ret, frame = cap.read()
+                if not ret: break
+                
+                darkened = cv2.addWeighted(frame, 0.5, np.zeros_like(frame), 0.5, 0)
+                heatmap = create_heatmap_overlay(brightness_per_frame[j], w, h)
+                
+                if heatmap is not None:
+                    result = cv2.addWeighted(darkened, 1.0, heatmap, 0.8, 0)
+                else:
+                    result = darkened
+                
+                out.write(result)
+        
+        # Add final heatmap frame
+        final_grid = np.zeros((h, w), dtype=np.float32)
+        for click in click_data:
+            x, y = int(float(click["x"]) * w), int(float(click["y"]) * h)
+            if 0 <= x < w and 0 <= y < h:
+                final_grid[y, x] += 1
+        
+        if np.sum(final_grid) > 0:
+            if np.max(final_grid) > 1.0:
+                final_grid = np.sqrt(final_grid / np.max(final_grid))
+            final_heatmap = create_heatmap_overlay(final_grid, w, h)
+            if final_heatmap is not None:
+                black = np.zeros((h, w, 3), dtype=np.uint8)
+                final_frame = cv2.addWeighted(black, 1.0, final_heatmap, 1.0, 0)
+                out.write(final_frame)
+        
+        cap.release()
+        out.release()
+        
+        # Cleanup
+        if reduced_path != video_path:
+            try: os.unlink(reduced_path)
+            except: pass
+        
+        print("Heatmap generation completed!")
+        return output_path
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
     global current_recording_process, current_recording_filepath
-    
+
+    if current_recording_process:
+            current_recording_process.terminate()
+            current_recording_process.wait()
+            current_recording_process = None    
     try:
-        # Start screen recording
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         current_recording_filepath = os.path.join(tempfile.gettempdir(), f"temp_recording_{timestamp}.mp4")
         
-        def start_recording_thread():
+        def record():
             global current_recording_process
-            cmd = ['ffmpeg', '-f', 'avfoundation', '-i', '1', '-r', '20', '-vf', 'scale=1280:720',
-                  '-vcodec', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p',
-                  '-y', current_recording_filepath]
+            cmd = ['ffmpeg', '-f', 'avfoundation', '-i', '1', '-r', '20', 
+                  '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1280:720',
+                  '-vcodec', 'libx264', '-preset', 'veryfast', '-crf', '25', 
+                  '-pix_fmt', 'yuv420p', '-y', current_recording_filepath]
             current_recording_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
-        threading.Thread(target=start_recording_thread).start()
+        threading.Thread(target=record).start()
         return jsonify({"status": "success", "message": "Recording started"})
         
     except Exception as e:
@@ -52,10 +183,9 @@ def stop_recording():
     try:
         data = request.get_json()
         click_data = data.get('click_data', [])
-        frame_width = data.get('frame_width', 1920)
-        frame_height = data.get('frame_height', 1080)
         
-        # Stop recording
+        print(f"Received {len(click_data)} clicks")
+        
         if current_recording_process:
             current_recording_process.terminate()
             current_recording_process.wait()
@@ -63,13 +193,11 @@ def stop_recording():
             time.sleep(2)
             
             if current_recording_filepath and os.path.exists(current_recording_filepath):
-                # Generate heatmap
-                heatmap_filepath = generate_heatmap(current_recording_filepath, click_data, frame_width, frame_height)
+                heatmap_path = generate_heatmap(current_recording_filepath, click_data)
                 os.unlink(current_recording_filepath)
                 
-                # Return heatmap video
-                if heatmap_filepath:
-                    return send_file(heatmap_filepath, mimetype='video/mp4', download_name='heatmap.mp4')
+                if heatmap_path:
+                    return send_file(heatmap_path, mimetype='video/mp4', download_name='heatmap.mp4')
                 else:
                     return jsonify({"status": "error", "message": "Failed to generate heatmap"}), 500
             else:
@@ -83,146 +211,24 @@ def stop_recording():
 @app.route('/generate_heatmap', methods=['POST'])
 def generate_heatmap():
     try:
-        # Get uploaded video and parameters
         video_file = request.files['video']
         clicks = json.loads(request.form.get('clicks'))
-        width = int(request.form.get('width'))
-        height = int(request.form.get('height'))
-
-        # Save uploaded video temporarily
+        
+        print(f"Video received: {video_file.filename}")
+        
         temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         video_file.save(temp_input.name)
         
-        # Generate heatmap
-        heatmap_filepath = generate_heatmap(temp_input.name, clicks, width, height)
+        heatmap_path = generate_heatmap(temp_input.name, clicks)
         os.unlink(temp_input.name)
         
-        # Return heatmap video
-        if heatmap_filepath:
-            return send_file(heatmap_filepath, mimetype='video/mp4', download_name='heatmap.mp4')
+        if heatmap_path:
+            return send_file(heatmap_path, mimetype='video/mp4', download_name='heatmap.mp4')
         else:
             return jsonify({"status": "error", "message": "Failed to generate heatmap"}), 500
             
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def generate_heatmap(video_path, click_data, original_width, original_height):
-    try:
-        # Setup output file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        heatmap_filepath = os.path.join(OUTPUT_DIR, f"heatmap_{timestamp}.mp4")
-        
-        # Open video
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return None
-        
-        # Get video properties
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        v_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        v_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        # Setup video writer
-        out = cv2.VideoWriter(heatmap_filepath, cv2.VideoWriter_fourcc(*'mp4v'), fps, (v_width, v_height))
-        
-        # Process clicks into frame intervals
-        fade_duration = int(fps * 0.3)
-        dot_intervals = {}
-        
-        for click in click_data:
-            # Scale click coordinates to video dimensions
-            x = int(float(click["x"]) * v_width / original_width)
-            y = v_height - 1 - int(float(click["y"]) * v_height / original_height)
-            x = min(max(x, 0), v_width - 1)
-            y = min(max(y, 0), v_height - 1)
-            
-            # Calculate frame range for this click
-            start_frame = max(0, int((click["timestamp"] * fps) - fade_duration))
-            end_frame = start_frame + fade_duration * 2
-            
-            if (x, y) not in dot_intervals:
-                dot_intervals[(x, y)] = []
-            dot_intervals[(x, y)].append((start_frame, end_frame))
-        
-        # Pre-calculate brightness for each frame
-        brightness_per_frame = np.zeros((frame_count, v_height, v_width), dtype=np.float32)
-        
-        for (x, y), intervals in dot_intervals.items():
-            for (start, end) in intervals:
-                for f in range(start, min(end + 1, frame_count)):
-                    # Calculate fade effect
-                    if f < start + fade_duration:
-                        brightness = (f - start) / fade_duration
-                    elif f > end - fade_duration:
-                        brightness = (end - f) / fade_duration
-                    else:
-                        brightness = 1.0
-                    brightness_per_frame[f, y, x] = max(brightness_per_frame[f, y, x], brightness)
-        
-        # Process each frame
-        for i in range(frame_count):
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Darken frame
-            frame = cv2.addWeighted(frame, 0.5, np.zeros_like(frame), 0.5, 0)
-            
-            # Add heatmap if there are clicks
-            if np.sum(brightness_per_frame[i]) > 0:
-                blurred = gaussian_filter(brightness_per_frame[i], sigma=40)
-                
-                # Create heatmap overlay
-                fig, ax = plt.subplots(figsize=(v_width / 100, v_height / 100), dpi=100)
-                ax.imshow(blurred, cmap='inferno', interpolation='bicubic', origin='lower',
-                         extent=[0, v_width, 0, v_height], aspect='auto')
-                ax.axis('off')
-                plt.tight_layout(pad=0)
-                
-                # Convert to image
-                buf = BytesIO()
-                plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
-                plt.close(fig)
-                buf.seek(0)
-                
-                heatmap = cv2.imdecode(np.frombuffer(buf.getvalue(), dtype=np.uint8), 1)
-                heatmap = cv2.resize(heatmap, (v_width, v_height))
-                frame = cv2.addWeighted(frame, 1.0, heatmap, 0.8, 0)
-            
-            out.write(frame)
-        
-        # Add final static heatmap frame showing all clicks
-        final_grid = np.zeros((v_height, v_width))
-        for (x, y), intervals in dot_intervals.items():
-            if 0 <= x < v_width and 0 <= y < v_height:
-                final_grid[y, x] += 1
-        
-        if np.sum(final_grid) > 0:
-            blurred = gaussian_filter(final_grid, sigma=40)
-            fig, ax = plt.subplots(figsize=(v_width / 100, v_height / 100), dpi=100)
-            ax.imshow(blurred, cmap='inferno', interpolation='bicubic', origin='lower',
-                     extent=[0, v_width, 0, v_height], aspect='auto')
-            ax.axis('off')
-            plt.tight_layout(pad=0)
-            buf = BytesIO()
-            plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
-            plt.close(fig)
-            buf.seek(0)
-            heatmap = cv2.imdecode(np.frombuffer(buf.getvalue(), dtype=np.uint8), 1)
-            heatmap = cv2.resize(heatmap, (v_width, v_height))
-            black = np.zeros((v_height, v_width, 3), dtype=np.uint8)
-            final_frame = cv2.addWeighted(black, 1.0, heatmap, 1.0, 0)
-            out.write(final_frame)
-        
-        cap.release()
-        out.release()
-        return heatmap_filepath
-        
-    except Exception as e:
-        print(f"Error generating heatmap: {e}")
-        return None
-
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5050, debug=True)
+    app.run(host='0.0.0.0', port=5555, debug=True)

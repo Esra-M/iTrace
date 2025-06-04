@@ -28,12 +28,13 @@ struct ImmersiveTrackingView: View {
     @State private var clickDataArray: [ClickData] = []
     @State private var isGeneratingHeatmap = false
     
-    private let frameSize: CGSize = CGSize(width: 3300, height: 1860)
+    private let frameSize: CGSize = CGSize(width: 3280, height: 1845)
+    
 
     var body: some View {
         RealityView { content, attachments in
             let headAnchor = AnchorEntity(.head)
-            headAnchor.transform.translation = [-0.016, -0.038, -1.2]
+            headAnchor.transform.translation = [-0.02, -0.038, -1.2]
             content.add(headAnchor)
             
             if let attachment = attachments.entity(for: "ui") {
@@ -56,12 +57,19 @@ struct ImmersiveTrackingView: View {
                                         tapLocation = value.location
                                         if let startTime = recordingStartTime {
                                             let timestamp = Date().timeIntervalSince(startTime)
+                                            
+                                            let xPercentage = Double(value.location.x / frameSize.width)
+                                            let yPercentage = Double(value.location.y / frameSize.height)
+                                            
+                                            let clampedX = max(0.0, min(1.0, xPercentage))
+                                            let clampedY = max(0.0, min(1.0, yPercentage))
+                                            
                                             clickDataArray.append(ClickData(
-                                                x: Double(value.location.x),
-                                                y: Double(value.location.y),
+                                                x: clampedX,
+                                                y: clampedY,
                                                 timestamp: timestamp
                                             ))
-                                            print("Clicked at (\(value.location.x), \(value.location.y)) at time \(timestamp)")
+                                            print("Clicked at (\(clampedX * 100)%, \(clampedY * 100)%) at time \(timestamp)")
                                         }
                                     }
                             )
@@ -69,7 +77,7 @@ struct ImmersiveTrackingView: View {
                         if let location = tapLocation {
                             Circle()
                                 .fill(Color.red)
-                                .frame(width: 20, height: 20)
+                                .frame(width: 40, height: 40)
                                 .position(location)
                         }
                     }
@@ -101,7 +109,10 @@ struct ImmersiveTrackingView: View {
                                     Text("RECORDING...")
                                         .font(.title2)
                                         .fontWeight(.bold)
-                                    Text(String(format: "%.2f", counterValue))
+                                    
+                                    let minutes = Int(counterValue) / 60
+                                    let seconds = counterValue.truncatingRemainder(dividingBy: 60)
+                                    Text(String(format: "%02d.%05.2f", minutes, seconds))
                                         .font(.title2)
                                         .fontWeight(.bold)
                                         .monospacedDigit()
@@ -144,9 +155,9 @@ struct ImmersiveTrackingView: View {
                 }
             }
         }
-        .onDisappear {
-            if isRecording { stopScreenRecording() }
-        }
+//        .onDisappear {
+//            if isRecording { stopScreenRecording() }
+//        }
     }
     
     private func startScreenRecording() {
@@ -157,9 +168,14 @@ struct ImmersiveTrackingView: View {
         clickDataArray.removeAll()
         appState.clickData.removeAll()
         
-        timer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
-            if let startTime = recordingStartTime {
-                counterValue = Date().timeIntervalSince(startTime)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            self.timer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
+                if let startTime = self.recordingStartTime {
+                    self.counterValue = Date().timeIntervalSince(startTime) - 0.4
+                    if self.counterValue < 0 {
+                        self.counterValue = 0.00
+                    }
+                }
             }
         }
         
@@ -178,7 +194,7 @@ struct ImmersiveTrackingView: View {
     }
     
     private func sendStartRecordingRequest() async {
-        guard let url = URL(string: "http://\(appState.serverIPAddress):5050/start_recording") else { return }
+        guard let url = URL(string: "http://\(appState.serverIPAddress)/start_recording") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -187,9 +203,7 @@ struct ImmersiveTrackingView: View {
         
         let requestBody = [
             "duration": 0,
-            "continuous": true,
-            "frame_width": Int(frameSize.width),
-            "frame_height": Int(frameSize.height)
+            "continuous": true
         ] as [String : Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         
@@ -202,7 +216,7 @@ struct ImmersiveTrackingView: View {
     }
     
     private func sendStopRecordingRequest() async {
-        guard let url = URL(string: "http://\(appState.serverIPAddress):5050/stop_recording") else {
+        guard let url = URL(string: "http://\(appState.serverIPAddress)/stop_recording") else {
             await MainActor.run { isGeneratingHeatmap = false }
             return
         }
@@ -214,9 +228,7 @@ struct ImmersiveTrackingView: View {
         
         let requestBody = [
             "stop": true,
-            "click_data": clickDataArray.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] },
-            "frame_width": Int(frameSize.width),
-            "frame_height": Int(frameSize.height)
+            "click_data": clickDataArray.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
         ] as [String : Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         

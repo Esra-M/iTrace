@@ -11,14 +11,14 @@ import AVFoundation
 struct EyeTrackingView: View {
     @EnvironmentObject private var appState: AppState
     
-    private static let videoFileName = "backgroundVideo1"
+    private static let videoFileName = "backgroundVideo"
     @State private var originalVideo = AVPlayer(url: Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4")!)
     @State private var activeVideo: AVPlayer?
     @State private var heatmapExportedURL: URL?
     @State private var lastPressTime: Date?
     @State private var pressedCoordinates: (x: CGFloat, y: CGFloat)?
     @State private var videoTimestamp: Double = 0
-    @State private var tapHistory: [(x: CGFloat, y: CGFloat, timestamp: Double)] = []
+    @State private var tapHistory: [(x: Double, y: Double, timestamp: Double)] = []
     @State private var currentTime: Double = 0
     @State private var sliderValue: Double = 0
     @State private var displayedTime: Double = 0
@@ -29,6 +29,8 @@ struct EyeTrackingView: View {
     @State private var timeObserver: Any?
     @State private var timeObserverPlayer: AVPlayer?
     @State private var viewSize: CGSize = .zero
+    @State private var videoSize: CGSize = .zero
+    @State private var videoRect: CGRect = .zero
     
     private var isHeatmapDisplayMode: Bool { appState.eyeTrackingMode == .heatmapDisplay }
 
@@ -36,10 +38,14 @@ struct EyeTrackingView: View {
         GeometryReader { geometry in
             ZStack {
                 if let player = activeVideo {
-                    VideoBackgroundView(player: player)
-                        .colorMultiply(.white)
-                        .ignoresSafeArea()
-                        .disabled(true)
+                    VideoBackgroundView(player: player) { calculatedVideoRect in
+                        DispatchQueue.main.async {
+                            self.videoRect = calculatedVideoRect
+                        }
+                    }
+                    .colorMultiply(.white)
+                    .ignoresSafeArea()
+                    .disabled(true)
                 }
 
                 Color.clear
@@ -49,13 +55,26 @@ struct EyeTrackingView: View {
                             .onEnded { value in
                                 guard !isPreparingHeatmap && !isHeatmapDisplayMode else { return }
                                 let location = value.location
+                                
+                                let videoPercentages = convertScreenToVideoPercentages(
+                                    screenPoint: location,
+                                    viewSize: geometry.size,
+                                    videoRect: videoRect
+                                )
+                                
+                                guard let percentages = videoPercentages else {
+                                    return
+                                }
+                                
                                 videoTimestamp = originalVideo.currentTime().seconds
                                 lastPressTime = Date()
-                                pressedCoordinates = (x: location.x, y: location.y)
-                                tapHistory.append((x: location.x, y: location.y, timestamp: videoTimestamp))
                                 
-                                // Print click coordinates and timestamp
-                                print("Clicked at (\(location.x), \(location.y)) at time \(videoTimestamp)")
+                                let pixelX = percentages.x * videoSize.width
+                                let pixelY = percentages.y * videoSize.height
+                                pressedCoordinates = (x: pixelX, y: pixelY)
+                                
+                                tapHistory.append((x: percentages.x, y: percentages.y, timestamp: videoTimestamp))
+                                
                             }
                     )
                     .allowsHitTesting(!isPreparingHeatmap)
@@ -77,6 +96,7 @@ struct EyeTrackingView: View {
                 }
 
                 Button(action: {
+                    activeVideo?.pause()
                     appState.eyeTrackingMode = .normal
                     appState.currentPage = .test
                 }) {
@@ -88,9 +108,13 @@ struct EyeTrackingView: View {
             .onAppear {
                 viewSize = geometry.size
                 setupVideo()
+                loadVideoSize()
             }
             .onDisappear { cleanupPlayer() }
-            .onChange(of: geometry.size) { _, newSize in viewSize = newSize }
+            .onChange(of: geometry.size) { _, newSize in
+                viewSize = newSize
+                calculateVideoRect()
+            }
             .onChange(of: appState.eyeTrackingMode) { _, newMode in
                 newMode == .heatmapDisplay ? setupHeatmapVideo() : setupNormalVideo()
             }
@@ -100,10 +124,10 @@ struct EyeTrackingView: View {
                         if !isHeatmapDisplayMode && originalVideo == activeVideo, let coords = pressedCoordinates {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Eye Tracking Data").font(.footnote).bold()
-                                Text(String(format: "Coordinates: (%.1f, %.1f)", coords.x, coords.y))
-                                    .font(.caption2).frame(width: 250, alignment: .leading)
+                                Text(String(format: "Video Coords: (%.1f, %.1f)", coords.x, coords.y))
+                                    .font(.caption2).frame(width: 220, alignment: .leading)
                                 Text("Timestamp: \(formatTimestamp(videoTimestamp))")
-                                    .font(.system(size: 11)).frame(width: 260, alignment: .leading)
+                                    .font(.system(size: 11))
                             }
                         }
                         
@@ -120,16 +144,26 @@ struct EyeTrackingView: View {
                             if editing {
                                 video.pause()
                             } else {
-                                let time = CMTime(seconds: sliderValue, preferredTimescale: 600)
-                                video.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-                                if isPlaying { video.play() }
+                                let clampedTime = min(sliderValue, duration - 0.1)
+                                let time = CMTime(seconds: clampedTime, preferredTimescale: 600)
+                                
+                                let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
+                                video.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { finished in
+                                    if finished && self.isPlaying {
+                                        video.play()
+                                    }
+                                }
                             }
                         })
                         .onChange(of: sliderValue) { oldValue, newValue in
                             if let video = activeVideo, video.timeControlStatus == .paused {
-                                let time = CMTime(seconds: newValue, preferredTimescale: 600)
-                                video.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
-                                displayedTime = newValue
+                                let clampedTime = min(newValue, duration - 0.1)
+                                let time = CMTime(seconds: clampedTime, preferredTimescale: 600)
+                                let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
+                                
+                                video.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
+                                    self.displayedTime = clampedTime
+                                }
                             }
                         }
                         .frame(width: 300)
@@ -153,6 +187,61 @@ struct EyeTrackingView: View {
         }
     }
     
+    
+    private func loadVideoSize() {
+        guard let videoURL = Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4") else { return }
+        
+        Task {
+            let asset = AVAsset(url: videoURL)
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                if let videoTrack = tracks.first {
+                    let size = try await videoTrack.load(.naturalSize)
+                    let transform = try await videoTrack.load(.preferredTransform)
+                    
+                    await MainActor.run {
+                        let transformedSize = size.applying(transform)
+                        self.videoSize = CGSize(width: abs(transformedSize.width), height: abs(transformedSize.height))
+                        calculateVideoRect()
+                    }
+                }
+            } catch {
+                print("Error loading video size: \(error)")
+            }
+        }
+    }
+    
+    private func calculateVideoRect() {
+        guard videoSize.width > 0 && videoSize.height > 0 && viewSize.width > 0 && viewSize.height > 0 else { return }
+        
+        let videoAspectRatio = videoSize.width / videoSize.height
+        let viewAspectRatio = viewSize.width / viewSize.height
+        
+        if videoAspectRatio > viewAspectRatio {
+            let scaledHeight = viewSize.width / videoAspectRatio
+            let yOffset = (viewSize.height - scaledHeight) / 2
+            videoRect = CGRect(x: 0, y: yOffset, width: viewSize.width, height: scaledHeight)
+        } else {
+            let scaledWidth = viewSize.height * videoAspectRatio
+            let xOffset = (viewSize.width - scaledWidth) / 2
+            videoRect = CGRect(x: xOffset, y: 0, width: scaledWidth, height: viewSize.height)
+        }
+    }
+    
+    private func convertScreenToVideoPercentages(screenPoint: CGPoint, viewSize: CGSize, videoRect: CGRect) -> CGPoint? {
+        guard videoRect.contains(screenPoint) else {
+            return nil
+        }
+        
+        let relativeX = (screenPoint.x - videoRect.minX) / videoRect.width
+        let relativeY = (screenPoint.y - videoRect.minY) / videoRect.height
+        
+        let clampedX = max(0.0, min(1.0, relativeX))
+        let clampedY = max(0.0, min(1.0, relativeY))
+        
+        return CGPoint(x: clampedX, y: clampedY)
+    }
+        
     private func setupVideo() {
         isHeatmapDisplayMode ? setupHeatmapVideo() : setupNormalVideo()
     }
@@ -224,14 +313,18 @@ struct EyeTrackingView: View {
     }
 
     private func generateHeatmapVideo() {
-        guard let url = URL(string: "http://\(appState.serverIPAddress):5050/generate_heatmap"),
+        guard let url = URL(string: "http://\(appState.serverIPAddress)/generate_heatmap"),
               let videoURL = Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4") else {
             print("Invalid URL or video file missing")
             isPreparingHeatmap = false
             return
         }
         
-        let clicksPayload = tapHistory.map { ["x": Double($0.x), "y": Double($0.y), "timestamp": $0.timestamp] }
+        let clicksPayload = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+        for (index, click) in clicksPayload.prefix(5).enumerated() {
+            print("Click \(index + 1): \(click["x"]! * 100)%, \(click["y"]! * 100)% at \(click["timestamp"]!)s")
+        }
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 300.0
@@ -241,7 +334,6 @@ struct EyeTrackingView: View {
         
         var data = Data()
         
-        // Add form data
         do {
             let jsonData = try JSONSerialization.data(withJSONObject: clicksPayload)
             data.append(formData(boundary: boundary, name: "clicks", value: jsonData))
@@ -251,10 +343,6 @@ struct EyeTrackingView: View {
             return
         }
         
-        data.append(formData(boundary: boundary, name: "width", value: "\(Int(viewSize.width))"))
-        data.append(formData(boundary: boundary, name: "height", value: "\(Int(viewSize.height))"))
-        
-        // Add video file
         do {
             let videoData = try Data(contentsOf: videoURL)
             data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"video\"; filename=\"\(Self.videoFileName).mp4\"\r\nContent-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
@@ -363,10 +451,12 @@ struct EyeTrackingView: View {
 
 struct VideoBackgroundView: UIViewRepresentable {
     let player: AVPlayer
+    let onVideoRectUpdate: (CGRect) -> Void
     
     func makeUIView(context: Context) -> PlayerView {
         let playerView = PlayerView()
         playerView.player = player
+        playerView.onVideoRectUpdate = onVideoRectUpdate
         return playerView
     }
 
@@ -374,6 +464,7 @@ struct VideoBackgroundView: UIViewRepresentable {
         if uiView.player != player {
             uiView.player = player
         }
+        uiView.onVideoRectUpdate = onVideoRectUpdate
     }
 }
 
@@ -383,6 +474,8 @@ class PlayerView: UIView {
             playerLayer.player = player
         }
     }
+    
+    var onVideoRectUpdate: ((CGRect) -> Void)?
     
     override class var layerClass: AnyClass {
         return AVPlayerLayer.self
@@ -395,18 +488,41 @@ class PlayerView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         playerLayer.frame = bounds
-        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.videoGravity = .resizeAspect
+        
+        if let player = player, let currentItem = player.currentItem {
+            let videoSize = currentItem.presentationSize
+            if videoSize.width > 0 && videoSize.height > 0 {
+                let videoRect = calculateVideoRect(videoSize: videoSize, containerSize: bounds.size)
+                onVideoRectUpdate?(videoRect)
+            }
+        }
+    }
+    
+    private func calculateVideoRect(videoSize: CGSize, containerSize: CGSize) -> CGRect {
+        let videoAspectRatio = videoSize.width / videoSize.height
+        let containerAspectRatio = containerSize.width / containerSize.height
+        
+        if videoAspectRatio > containerAspectRatio {
+            let scaledHeight = containerSize.width / videoAspectRatio
+            let yOffset = (containerSize.height - scaledHeight) / 2
+            return CGRect(x: 0, y: yOffset, width: containerSize.width, height: scaledHeight)
+        } else {
+            let scaledWidth = containerSize.height * videoAspectRatio
+            let xOffset = (containerSize.width - scaledWidth) / 2
+            return CGRect(x: xOffset, y: 0, width: scaledWidth, height: containerSize.height)
+        }
     }
     
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
-        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.videoGravity = .resizeAspect
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         backgroundColor = .clear
-        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.videoGravity = .resizeAspect
     }
 }
