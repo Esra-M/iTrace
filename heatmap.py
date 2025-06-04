@@ -19,6 +19,46 @@ current_recording_process = None
 current_recording_filepath = None
 OUTPUT_DIR = os.path.expanduser("~/Desktop/HeatmapRecordings")
 
+def get_screen_resolution():
+    """Get the Mac's actual pixel resolution (considering Retina scaling)"""
+    try:
+        # Get display info using system_profiler
+        cmd = ['system_profiler', 'SPDisplaysDataType', '-json']
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            displays = data.get('SPDisplaysDataType', [])
+            
+            for display in displays:
+                # Look for the main display
+                if 'spdisplays_resolution' in display:
+                    resolution = display['spdisplays_resolution']
+                    # Parse resolution string
+                    if 'x' in resolution:
+                        width_str, height_str = resolution.split(' x ')
+                        width = int(width_str.strip())
+                        height = int(height_str.strip())
+                        return width, height
+        
+        # Fallback method using osascript to get logical resolution, then double it
+        cmd = ['osascript', '-e', 'tell application "Finder" to get bounds of window of desktop']
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            bounds = result.stdout.strip().split(', ')
+            if len(bounds) == 4:
+                logical_width = int(bounds[2])
+                logical_height = int(bounds[3])
+                width = logical_width * 2
+                height = logical_height * 2
+                return width, height
+                
+    except Exception as e:
+        print(f"Error getting screen resolution: {e}")
+    
+    return None, None
+
 def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
     # Reduce video quality for faster processing
     try:
@@ -150,6 +190,19 @@ def generate_heatmap(video_path, click_data):
         print(f"Error: {e}")
         return None
 
+@app.route('/get_screen_resolution', methods=['GET'])
+def get_screen_resolution_endpoint():
+    """API endpoint to get Mac screen resolution - only returns width and height if available"""
+    width, height = get_screen_resolution()
+    
+    if width and height:
+        return jsonify({
+            "width": width,
+            "height": height
+        })
+    else:
+        return jsonify({}), 404
+
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
     global current_recording_process, current_recording_filepath
@@ -209,7 +262,7 @@ def stop_recording():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/generate_heatmap', methods=['POST'])
-def generate_heatmap():
+def generate_heatmap_endpoint():
     try:
         video_file = request.files['video']
         clicks = json.loads(request.form.get('clicks'))

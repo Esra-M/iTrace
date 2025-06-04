@@ -27,9 +27,15 @@ struct ImmersiveTrackingView: View {
     @State private var recordingStartTime: Date?
     @State private var clickDataArray: [ClickData] = []
     @State private var isGeneratingHeatmap = false
+    @State private var screenResolution: CGSize = CGSize(width: 3600, height: 2338) // Default fallback
     
-    private let frameSize: CGSize = CGSize(width: 3280, height: 1845)
-    
+    // Calculate frame size based on percentages of Mac screen resolution
+    private var frameSize: CGSize {
+        CGSize(
+            width: screenResolution.width * 0.911,
+            height: screenResolution.height * 0.789
+        )
+    }
 
     var body: some View {
         RealityView { content, attachments in
@@ -155,9 +161,45 @@ struct ImmersiveTrackingView: View {
                 }
             }
         }
+        .onAppear {
+            Task {
+                await fetchScreenResolution()
+            }
+        }
 //        .onDisappear {
 //            if isRecording { stopScreenRecording() }
 //        }
+    }
+    
+    private func fetchScreenResolution() async {
+        guard let url = URL(string: "http://\(appState.serverIPAddress)/get_screen_resolution") else {
+            print("Invalid server URL")
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10.0
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let width = json["width"] as? Int,
+               let height = json["height"] as? Int {
+                
+                await MainActor.run {
+                    screenResolution = CGSize(width: CGFloat(width), height: CGFloat(height))
+                    print("Screen resolution updated: \(width)×\(height)")
+                }
+            } else {
+                print("No screen resolution data available, using default")
+            }
+        } catch {
+            print("Failed to fetch screen resolution: \(error)")
+            print("Using default resolution: \(Int(screenResolution.width))×\(Int(screenResolution.height))")
+        }
     }
     
     private func startScreenRecording() {
