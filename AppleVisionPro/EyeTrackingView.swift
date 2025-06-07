@@ -31,6 +31,7 @@ struct EyeTrackingView: View {
     @State private var viewSize: CGSize = .zero
     @State private var videoSize: CGSize = .zero
     @State private var videoRect: CGRect = .zero
+    @State private var backgroundVid: Bool = false
     
     @State private var backButtonPressProgress: CGFloat = 0
     @State private var backButtonTimer: Timer?
@@ -88,10 +89,21 @@ struct EyeTrackingView: View {
 
                 if isPreparingHeatmap {
                     Color.black.opacity(0.6).ignoresSafeArea()
-                    ProgressView("Generating heatmap")
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .foregroundColor(.white)
-                        .scaleEffect(1.5)
+                    VStack(spacing: 20) {
+                        ProgressView("Generating Heatmap...")
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .foregroundColor(.white)
+                            .scaleEffect(1.5)
+                        
+                        Button(action: {
+                            generateInBackground()
+                        }) {
+                            Text("Generate in Background")
+                                .font(.title2)
+                                .padding()
+                        }
+                        .padding()
+                    }
                 }
 
                 if isExporting {
@@ -134,7 +146,7 @@ struct EyeTrackingView: View {
                         )
                         
                         if showHelpText {
-                            Text("Press and hold")
+                            Text("Press and Hold")
                                 .font(.system(size: 14))
                                 .padding(8)
                                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
@@ -241,6 +253,17 @@ struct EyeTrackingView: View {
                     }
                     .padding()
                 }
+            }
+        }
+    }
+    
+    private func generateInBackground() {
+        backgroundVid = true
+        print("Generating video in background")
+        Task {
+            await MainActor.run {
+                appState.currentPage = .test
+                isPreparingHeatmap = false
             }
         }
     }

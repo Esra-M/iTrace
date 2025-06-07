@@ -35,6 +35,7 @@ struct ImmersiveTrackingView: View {
     @State private var stopButtonPressProgress: CGFloat = 0
     @State private var stopButtonTimer: Timer?
     @State private var isStopButtonPressed = false
+    @State private var backgroundVid: Bool = false
     
     private let stopButtonPressDuration: Double = 2.0
     
@@ -105,9 +106,19 @@ struct ImmersiveTrackingView: View {
                                     Text("Generating Heatmap...")
                                         .font(.title)
                                         .fontWeight(.bold)
+                                        .padding()
+                                    
+                                    Button(action: {
+                                        generateInBackground()
+                                    }) {
+                                        Text("Generate in Background")
+                                            .font(.title2)
+                                            .padding()
+                                    }
+                                    .padding()
                                 }
                                 .padding(50)
-                                .background(.ultraThinMaterial)
+                                .glassBackgroundEffect()
                                 .cornerRadius(25)
                                 Spacer()
                             }
@@ -151,8 +162,7 @@ struct ImmersiveTrackingView: View {
                                                 .font(.largeTitle)
                                                 .fontWeight(.bold)
                                         }
-                                        .padding(.horizontal, 15)
-                                        .padding(.vertical, 15)
+                                        .padding(15)
                                     }
                                     .simultaneousGesture(
                                         DragGesture(minimumDistance: 0)
@@ -172,7 +182,7 @@ struct ImmersiveTrackingView: View {
                                     )
                                     
                                     if showPressHoldHint {
-                                        Text("Press and hold")
+                                        Text("Press and Hold")
                                             .font(.system(size: 20))
                                             .padding(8)
                                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
@@ -229,11 +239,23 @@ struct ImmersiveTrackingView: View {
             }
         }
         .onDisappear {
-            stopStopButtonPress()
+            if isRecording {
+                stopScreenRecording()
+                generateInBackground()
+            }
         }
-//        .onDisappear {
-//            if isRecording { stopScreenRecording() }
-//        }
+    }
+    
+    private func generateInBackground() {
+        backgroundVid = true
+        print("Generating video in background")
+        Task {
+            await dismissImmersiveSpace()
+            await MainActor.run {
+                appState.currentPage = .test
+            }
+            openWindow(id: "main")
+        }
     }
     
     private func startStopButtonPress() {
@@ -337,7 +359,9 @@ struct ImmersiveTrackingView: View {
             if let httpResponse = response as? HTTPURLResponse,
                httpResponse.statusCode == 200,
                httpResponse.mimeType == "video/mp4" {
-                await handleReceivedVideoData(data)
+                if !backgroundVid{
+                    await handleReceivedVideoData(data)
+                }
             } else {
                 await MainActor.run { isGeneratingHeatmap = false }
             }
