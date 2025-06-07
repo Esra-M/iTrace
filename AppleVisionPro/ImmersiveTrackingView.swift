@@ -27,6 +27,9 @@ struct ImmersiveTrackingView: View {
     @State private var recordingStartTime: Date?
     @State private var clickDataArray: [ClickData] = []
     @State private var isGeneratingHeatmap = false
+    @State private var showPressHoldHint = false
+    @State private var hintTimer: Timer?
+
     @State private var screenResolution: CGSize = CGSize(width: 3600, height: 2338)
     
     @State private var stopButtonPressProgress: CGFloat = 0
@@ -45,7 +48,7 @@ struct ImmersiveTrackingView: View {
     var body: some View {
         RealityView { content, attachments in
             let headAnchor = AnchorEntity(.head)
-            headAnchor.transform.translation = [-0.02, -0.038, -1.2]
+            headAnchor.transform.translation = [-0.022, -0.038, -1.2]
             content.add(headAnchor)
             
             if let attachment = attachments.entity(for: "ui") {
@@ -84,7 +87,7 @@ struct ImmersiveTrackingView: View {
                                         }
                                     }
                             )
-
+                        
                         if let location = tapLocation {
                             Circle()
                                 .fill(Color.red)
@@ -92,7 +95,7 @@ struct ImmersiveTrackingView: View {
                                 .position(location)
                         }
                     }
-
+                    
                     VStack(spacing: 0) {
                         if isGeneratingHeatmap {
                             VStack(spacing: 30) {
@@ -133,14 +136,10 @@ struct ImmersiveTrackingView: View {
                                 .background(RoundedRectangle(cornerRadius: 15).fill(.ultraThinMaterial))
                                 
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 25)
-                                        .stroke(Color.white.opacity(0.3), lineWidth: 3)
-                                        .frame(width: 185, height: 80)
-                                    
-                                    RoundedRectangle(cornerRadius: 25)
+                                    RoundedRectangle(cornerRadius: 50)
                                         .trim(from: 0, to: stopButtonPressProgress)
                                         .stroke(Color.white, lineWidth: 3)
-                                        .frame(width: 80, height: 185)
+                                        .frame(width: 70, height: 208)
                                         .rotationEffect(.degrees(-90))
                                         .animation(.linear(duration: 0.1), value: stopButtonPressProgress)
                                     
@@ -152,22 +151,36 @@ struct ImmersiveTrackingView: View {
                                                 .font(.largeTitle)
                                                 .fontWeight(.bold)
                                         }
-                                        .padding(.horizontal, 25)
+                                        .padding(.horizontal, 15)
                                         .padding(.vertical, 15)
-                                        .background(RoundedRectangle(cornerRadius: 15).fill(.ultraThinMaterial))
                                     }
-                                    .buttonStyle(PlainButtonStyle())
                                     .simultaneousGesture(
                                         DragGesture(minimumDistance: 0)
                                             .onChanged { _ in
                                                 if !isStopButtonPressed {
                                                     startStopButtonPress()
+                                                    showPressHoldHint = true
+                                                    hintTimer?.invalidate()
+                                                    hintTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                                                        showPressHoldHint = false
+                                                    }
                                                 }
                                             }
                                             .onEnded { _ in
                                                 stopStopButtonPress()
                                             }
                                     )
+                                    
+                                    if showPressHoldHint {
+                                        Text("Press and hold")
+                                            .font(.system(size: 20))
+                                            .padding(8)
+                                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                                            .offset(y: 80)
+                                    }
+                                }
+                                .onDisappear {
+                                    hintTimer?.invalidate()
                                 }
                             }
                             .padding(.top, 100)
@@ -184,13 +197,13 @@ struct ImmersiveTrackingView: View {
                                     }
                                 }) {
                                     Image(systemName: "chevron.backward")
-                                        .font(.system(size: 24))
-                                        .padding()
+                                        .padding(20)
+                                    
                                 }
-                                .clipShape(Circle())
-                                .offset(x: -290, y: 10)
+                                .frame(width: 60, height: 60)
+                                .offset(x: -340, y: 10)
                                 
-                                Text("Before you start, anable View Mirroring")
+                                Text("Before you start, enable View Mirroring")
                                     .font(.largeTitle)
                                     .padding(60)
                                 
@@ -206,18 +219,13 @@ struct ImmersiveTrackingView: View {
                                 }
                                 .padding(20)
                             }
-                            .frame(width: 700, height: 400)
+                            .frame(width: 800, height: 400)
                             .glassBackgroundEffect()
                         }
                         Spacer()
                     }
                     .frame(width: frameSize.width, height: frameSize.height)
                 }
-            }
-        }
-        .onAppear {
-            Task {
-                await fetchScreenResolution()
             }
         }
         .onDisappear {
@@ -249,37 +257,6 @@ struct ImmersiveTrackingView: View {
         stopButtonPressProgress = 0
     }
     
-    private func fetchScreenResolution() async {
-        guard let url = URL(string: "http://\(appState.serverIPAddress)/get_screen_resolution") else {
-            print("Invalid server URL")
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10.0
-        
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
-               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let width = json["width"] as? Int,
-               let height = json["height"] as? Int {
-                
-                await MainActor.run {
-                    screenResolution = CGSize(width: CGFloat(width), height: CGFloat(height))
-                    print("Screen resolution updated: \(width)×\(height)")
-                }
-            } else {
-                print("No screen resolution data available, using default")
-            }
-        } catch {
-            print("Failed to fetch screen resolution: \(error)")
-            print("Using default resolution: \(Int(screenResolution.width))×\(Int(screenResolution.height))")
-        }
-    }
-    
     private func startScreenRecording() {
         isRecording = true
         recordingStartTime = Date()
@@ -303,6 +280,8 @@ struct ImmersiveTrackingView: View {
     }
     
     private func stopScreenRecording() {
+        guard !isGeneratingHeatmap else { return }
+        
         isRecording = false
         timer?.invalidate()
         timer = nil
@@ -314,7 +293,7 @@ struct ImmersiveTrackingView: View {
     }
     
     private func sendStartRecordingRequest() async {
-        guard let url = URL(string: "http://\(appState.serverIPAddress)/start_recordin") else { return }
+        guard let url = URL(string: "http://\(appState.serverIPAddress)/start_recording") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -376,18 +355,19 @@ struct ImmersiveTrackingView: View {
             try data.write(to: tempURL)
             print("Heatmap video generated")
             
+            await dismissImmersiveSpace()
+
             await MainActor.run {
                 appState.heatmapVideoURL = tempURL
                 appState.clickData = clickDataArray
                 
                 appState.eyeTrackingMode = .heatmapDisplay
+                appState.currentPage = .eyeTracking
+                
+                isGeneratingHeatmap = false
                 
                 openWindow(id: "main")
-                appState.currentPage = .eyeTracking
-                isGeneratingHeatmap = false
             }
-            
-            Task { await dismissImmersiveSpace() }
             
         } catch {
             print("Failed to save video file: \(error)")

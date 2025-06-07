@@ -11,7 +11,7 @@ import AVFoundation
 struct EyeTrackingView: View {
     @EnvironmentObject private var appState: AppState
     
-    private static let videoFileName = "backgroundVideo"
+    private static let videoFileName = "backgroundVideo1"
     @State private var originalVideo = AVPlayer(url: Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4")!)
     @State private var activeVideo: AVPlayer?
     @State private var heatmapExportedURL: URL?
@@ -35,6 +35,8 @@ struct EyeTrackingView: View {
     @State private var backButtonPressProgress: CGFloat = 0
     @State private var backButtonTimer: Timer?
     @State private var isBackButtonPressed = false
+    @State private var showHelpText = false
+    @State private var helpTimer: Timer?
     
     private let backButtonPressDuration: Double = 2.0
     private var isHeatmapDisplayMode: Bool { appState.eyeTrackingMode == .heatmapDisplay }
@@ -100,37 +102,63 @@ struct EyeTrackingView: View {
                         .scaleEffect(1.5)
                 }
 
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.3), lineWidth: 3)
-                        .frame(width: 50, height: 50)
-                    
-                    Circle()
-                        .trim(from: 0, to: backButtonPressProgress)
-                        .stroke(Color.white, lineWidth: 3)
-                        .frame(width: 50, height: 50)
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.1), value: backButtonPressProgress)
-                    
-                    Button(action: {}) {
-                        Image(systemName: "chevron.backward")
-                            .foregroundColor(.white)
-                            .font(.title2)
-                    }
-                    .frame(width: 44, height: 44)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { _ in
-                                if !isBackButtonPressed {
-                                    startBackButtonPress()
+                if activeVideo === originalVideo {
+                    ZStack {
+                        Circle()
+                            .trim(from: 0, to: backButtonPressProgress)
+                            .stroke(Color.white, lineWidth: 3)
+                            .frame(width: 60, height: 60)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 0.1), value: backButtonPressProgress)
+                        
+                        Button(action: {}) {
+                            Image(systemName: "chevron.backward")
+                                .padding(20)
+                        }
+                        .frame(width: 60, height: 60)
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { _ in
+                                    if !isBackButtonPressed {
+                                        startBackButtonPress()
+                                        showHelpText = true
+                                        helpTimer?.invalidate()
+                                        helpTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                                            showHelpText = false
+                                        }
+                                    }
                                 }
-                            }
-                            .onEnded { _ in
-                                stopBackButtonPress()
-                            }
-                    )
+                                .onEnded { _ in
+                                    stopBackButtonPress()
+                                }
+                        )
+                        
+                        if showHelpText {
+                            Text("Press and hold")
+                                .font(.system(size: 14))
+                                .padding(8)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                                .offset(y: 60)
+                        }
+                    }
+                    .onDisappear {
+                        helpTimer?.invalidate()
+                    }
+                    .offset(x: -580, y: -300)
+                } else {
+                    Button(action: {
+                        activeVideo?.pause()
+                        appState.eyeTrackingMode = .normal
+                        appState.currentPage = .test
+                    }) {
+                        Image(systemName: "chevron.backward")
+                            .padding(20)
+
+                    }
+                    .frame(width: 60, height: 60)
+                    .offset(x: -580, y: -300)
+                    
                 }
-                .offset(x: -580, y: -300)
             }
             .onAppear {
                 viewSize = geometry.size

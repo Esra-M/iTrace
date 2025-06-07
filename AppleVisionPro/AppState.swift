@@ -27,7 +27,7 @@ class AppState: ObservableObject {
     }
     @Published var currentPage: WindowPage = .test
     
-    @Published var serverIPAddress: String = "192.168.0.107:5555"
+    @Published var serverIPAddress: String = "192.168.0.109:5555"
 
     @Published var clickData: [ClickData] = []
     @Published var heatmapVideoURL: URL?

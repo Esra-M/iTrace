@@ -24,9 +24,11 @@ struct SelectionView: View {
                 }
             }) {
                 Image(systemName: "chevron.backward")
+                    .padding(20)
             }
-            .clipShape(Circle())
             .offset(x: -580, y: -300)
+            .frame(width: 60, height: 60)
+            
             
             Text("Select all the spheres by clicking on them")
         }

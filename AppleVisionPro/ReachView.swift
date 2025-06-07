@@ -22,8 +22,9 @@ struct ReachView: View {
                 }
             }) {
                 Image(systemName: "chevron.backward")
+                    .padding(20)
             }
-            .clipShape(Circle())
+            .frame(width: 60, height: 60)
             .offset(x: -580, y: -300)
             
             VStack{

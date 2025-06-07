@@ -27,9 +27,10 @@ struct TypingView: View {
                 appState.currentPage = .test
             }) {
                 Image(systemName: "chevron.backward")
+                    .padding(20)
             }
-            .clipShape(Circle())
             .offset(x: -580, y: -300)
+            .frame(width: 60, height: 60)
             
             VStack(spacing: 30) {
                 
