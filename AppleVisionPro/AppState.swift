@@ -19,6 +19,7 @@ class AppState: ObservableObject {
         case select
         case eyeTracking
         case bullseyeTest
+        case videoUpload
     }
     
     enum EyeTrackingMode {
@@ -31,8 +32,8 @@ class AppState: ObservableObject {
 
     @Published var clickData: [ClickData] = []
     @Published var heatmapVideoURL: URL?
+    @Published var uploadedVideoURL: URL?
     @Published var eyeTrackingMode: EyeTrackingMode = .normal
 
     @Published var reachResult: String = ""
 }
-

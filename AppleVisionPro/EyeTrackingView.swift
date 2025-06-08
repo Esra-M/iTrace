@@ -11,8 +11,7 @@ import AVFoundation
 struct EyeTrackingView: View {
     @EnvironmentObject private var appState: AppState
     
-    private static let videoFileName = "backgroundVideo1"
-    @State private var originalVideo = AVPlayer(url: Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4")!)
+    @State private var originalVideo: AVPlayer?
     @State private var activeVideo: AVPlayer?
     @State private var heatmapExportedURL: URL?
     @State private var lastPressTime: Date?
@@ -56,41 +55,44 @@ struct EyeTrackingView: View {
                     .disabled(true)
                 }
 
-                Color.clear
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onEnded { value in
-                                guard !isPreparingHeatmap && !isHeatmapDisplayMode else { return }
-                                let location = value.location
-                                
-                                let videoPercentages = convertScreenToVideoPercentages(
-                                    screenPoint: location,
-                                    viewSize: geometry.size,
-                                    videoRect: videoRect
-                                )
-                                
-                                guard let percentages = videoPercentages else {
-                                    return
+                if let _ = activeVideo {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 0)
+                                .onEnded { value in
+                                    guard !isPreparingHeatmap && !isHeatmapDisplayMode else { return }
+                                    let location = value.location
+                                    
+                                    let videoPercentages = convertScreenToVideoPercentages(
+                                        screenPoint: location,
+                                        viewSize: geometry.size,
+                                        videoRect: videoRect
+                                    )
+                                    
+                                    guard let percentages = videoPercentages else {
+                                        return
+                                    }
+                                    
+                                    videoTimestamp = originalVideo?.currentTime().seconds ?? 0
+                                    lastPressTime = Date()
+                                    
+                                    let pixelX = percentages.x * videoSize.width
+                                    let pixelY = percentages.y * videoSize.height
+                                    pressedCoordinates = (x: pixelX, y: pixelY)
+                                    
+                                    tapHistory.append((x: percentages.x, y: percentages.y, timestamp: videoTimestamp))
+                                    print("Clicked at (\(percentages.x * 100), \(percentages.y * 100)) at time \(videoTimestamp)")
+
                                 }
-                                
-                                videoTimestamp = originalVideo.currentTime().seconds
-                                lastPressTime = Date()
-                                
-                                let pixelX = percentages.x * videoSize.width
-                                let pixelY = percentages.y * videoSize.height
-                                pressedCoordinates = (x: pixelX, y: pixelY)
-                                
-                                tapHistory.append((x: percentages.x, y: percentages.y, timestamp: videoTimestamp))
-                                
-                            }
-                    )
-                    .allowsHitTesting(!isPreparingHeatmap)
+                        )
+                        .allowsHitTesting(!isPreparingHeatmap)
+                }
 
                 if isPreparingHeatmap {
                     Color.black.opacity(0.6).ignoresSafeArea()
                     VStack(spacing: 20) {
-                        ProgressView("Generating Heatmap...")
+                        ProgressView("Generating Heatmap")
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .foregroundColor(.white)
                             .scaleEffect(1.5)
@@ -157,7 +159,7 @@ struct EyeTrackingView: View {
                         helpTimer?.invalidate()
                     }
                     .offset(x: -580, y: -300)
-                } else {
+                } else if activeVideo != nil {
                     Button(action: {
                         activeVideo?.pause()
                         appState.eyeTrackingMode = .normal
@@ -174,6 +176,7 @@ struct EyeTrackingView: View {
             }
             .onAppear {
                 viewSize = geometry.size
+                setupVideoFromUpload()
                 setupVideo()
                 loadVideoSize()
             }
@@ -208,6 +211,7 @@ struct EyeTrackingView: View {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                                 .font(.title).bold().padding()
                         }
+                        .disabled(activeVideo == nil)
 
                         Slider(value: $sliderValue, in: 0...duration, onEditingChanged: { editing in
                             guard let video = activeVideo else { return }
@@ -237,6 +241,7 @@ struct EyeTrackingView: View {
                             }
                         }
                         .frame(width: 300)
+                        .disabled(activeVideo == nil)
                         
                         Text("\(formatTime(sliderValue)) / \(formatTime(duration))")
                             .font(.caption2)
@@ -255,6 +260,14 @@ struct EyeTrackingView: View {
                 }
             }
         }
+    }
+    
+    private func setupVideoFromUpload() {
+        guard let uploadedURL = appState.uploadedVideoURL else {
+            originalVideo = nil
+            return
+        }
+        originalVideo = AVPlayer(url: uploadedURL)
     }
     
     private func generateInBackground() {
@@ -278,7 +291,7 @@ struct EyeTrackingView: View {
             if backButtonPressProgress >= 1.0 {
                 activeVideo?.pause()
                 appState.eyeTrackingMode = .normal
-                appState.currentPage = .test
+                appState.currentPage = .videoUpload
                 stopBackButtonPress()
             }
         }
@@ -293,10 +306,10 @@ struct EyeTrackingView: View {
     
     
     private func loadVideoSize() {
-        guard let videoURL = Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4") else { return }
+        guard let uploadedURL = appState.uploadedVideoURL else { return }
         
         Task {
-            let asset = AVAsset(url: videoURL)
+            let asset = AVAsset(url: uploadedURL)
             do {
                 let tracks = try await asset.loadTracks(withMediaType: .video)
                 if let videoTrack = tracks.first {
@@ -356,13 +369,15 @@ struct EyeTrackingView: View {
         setupPlayerObserver()
         loadDuration()
         
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
-                                               object: originalVideo.currentItem,
-                                               queue: .main) { _ in
-            if !isPreparingHeatmap && !isHeatmapDisplayMode {
-                isPreparingHeatmap = true
-                print("Starting heatmap video generation...")
-                generateHeatmapVideo()
+        if let originalVideo = originalVideo {
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
+                                                   object: originalVideo.currentItem,
+                                                   queue: .main) { _ in
+                if !isPreparingHeatmap && !isHeatmapDisplayMode {
+                    isPreparingHeatmap = true
+                    print("Starting heatmap video generation...")
+                    generateHeatmapVideo()
+                }
             }
         }
     }
@@ -418,16 +433,14 @@ struct EyeTrackingView: View {
 
     private func generateHeatmapVideo() {
         guard let url = URL(string: "http://\(appState.serverIPAddress)/generate_heatmap"),
-              let videoURL = Bundle.main.url(forResource: Self.videoFileName, withExtension: "mp4") else {
-            print("Invalid URL or video file missing")
+              let videoURL = appState.uploadedVideoURL else {
+            print("Invalid URL or no uploaded video")
             isPreparingHeatmap = false
             return
         }
         
         let clicksPayload = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
-        for (index, click) in clicksPayload.prefix(5).enumerated() {
-            print("Click \(index + 1): \(click["x"]! * 100)%, \(click["y"]! * 100)% at \(click["timestamp"]!)s")
-        }
+
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -449,7 +462,8 @@ struct EyeTrackingView: View {
         
         do {
             let videoData = try Data(contentsOf: videoURL)
-            data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"video\"; filename=\"\(Self.videoFileName).mp4\"\r\nContent-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
+            let videoFileName = videoURL.lastPathComponent
+            data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"video\"; filename=\"\(videoFileName)\"\r\nContent-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
             data.append(videoData)
             data.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         } catch {

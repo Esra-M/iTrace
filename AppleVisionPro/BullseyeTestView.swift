@@ -62,7 +62,7 @@ struct BullseyeTestView: View {
                 }
                 .frame(height: 40)
             }
-            .padding()
+            .padding(.top, 100)
             
             Button(action: {
                 appState.currentPage = .test

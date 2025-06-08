@@ -31,6 +31,8 @@ struct AppleVisionProApp: App {
                             minHeight: 720, maxHeight: 720)
                 case .bullseyeTest:
                     BullseyeTestView()
+                case .videoUpload:
+                    VideoUploadView()
                 }
             }
             .environmentObject(appState)

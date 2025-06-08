@@ -84,7 +84,7 @@ struct ImmersiveTrackingView: View {
                                                 y: clampedY,
                                                 timestamp: timestamp
                                             ))
-                                            print("Clicked at (\(clampedX * 100)%, \(clampedY * 100)%) at time \(timestamp)")
+                                            print("Clicked at (\(clampedX * 100), \(clampedY * 100)) at time \(timestamp)")
                                         }
                                     }
                             )
@@ -103,7 +103,8 @@ struct ImmersiveTrackingView: View {
                                 Spacer()
                                 VStack(spacing: 20) {
                                     ProgressView().scaleEffect(2.0)
-                                    Text("Generating Heatmap...")
+                                        .padding(.top, 30)
+                                    Text("Generating Heatmap")
                                         .font(.title)
                                         .fontWeight(.bold)
                                         .padding()
@@ -330,7 +331,6 @@ struct ImmersiveTrackingView: View {
         
         do {
             let (_, _) = try await URLSession.shared.data(for: request)
-            print("Recording started on server")
         } catch {
             print("Failed to start recording: \(error)")
         }

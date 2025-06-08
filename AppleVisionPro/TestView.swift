@@ -100,7 +100,7 @@ struct TestView: View {
                     Button(isLoadingEyeTracking ? "Loading..." : "Eye Tracking") {
                         isLoadingEyeTracking = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            appState.currentPage = .eyeTracking
+                            appState.currentPage = .videoUpload
                         }
                     }
                     .disabled(isLoadingEyeTracking)

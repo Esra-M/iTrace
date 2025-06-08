@@ -31,7 +31,7 @@ struct ClickingView: View {
             
             VStack(spacing: 40) {
                 
-                Text("Click on the circle until it's tull")
+                Text("Click on the circle until it's full")
                     .font(.largeTitle)
                 
                 ZStack {
@@ -54,13 +54,16 @@ struct ClickingView: View {
                     }
                 )
                 
-                if clickCount == totalClicks, let start = startTime, let end = endTime {
-                    let timeTaken = end.timeIntervalSince(start)
-                    Text("Time: \(String(format: "%.2f", timeTaken)) seconds")
-                        .font(.title2)
+                VStack {
+                    if clickCount == totalClicks, let start = startTime, let end = endTime {
+                        let timeTaken = end.timeIntervalSince(start)
+                        Text("Time: \(String(format: "%.2f", timeTaken)) seconds")
+                            .font(.title2)
+                    }
                 }
+                .frame(height: 40)
             }
-            .padding()
+            .padding(.top, 50)
         }
     }
 
@@ -80,4 +83,3 @@ struct ClickingView: View {
         }
     }
 }
-
