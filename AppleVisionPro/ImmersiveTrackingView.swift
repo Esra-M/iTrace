@@ -29,7 +29,6 @@ struct ImmersiveTrackingView: View {
     @State private var isGeneratingHeatmap = false
     @State private var showPressHoldHint = false
     @State private var hintTimer: Timer?
-    @State private var showBackgroundButton = false
 
     @State private var screenResolution: CGSize = CGSize(width: 3600, height: 2338)
     
@@ -112,34 +111,18 @@ struct ImmersiveTrackingView: View {
                                         .fontWeight(.bold)
                                         .padding()
                                     
-                                    VStack {
-                                        if showBackgroundButton {
-                                            Button(action: {
-                                                generateInBackground()
-                                            }) {
-                                                Text("Generate in Background")
-                                                    .font(.title2)
-                                                    .padding()
-                                            }
-                                            .transition(.opacity.combined(with: .scale))
-                                        }
+                                    Button(action: {
+                                        generateInBackground()
+                                    }) {
+                                        Text("Generate in Background")
+                                            .font(.title2)
+                                            .padding()
                                     }
-                                    .frame(height: 50)
                                 }
                                 .frame(width: 500)
                                 .padding(40)
                                 .glassBackgroundEffect()
                                 .cornerRadius(25)
-                                .onAppear {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                        withAnimation(.easeInOut(duration: 0.3)) {
-                                            showBackgroundButton = true
-                                        }
-                                    }
-                                }
-                                .onDisappear {
-                                    showBackgroundButton = false
-                                }
                                 
                                 Spacer()
                             }

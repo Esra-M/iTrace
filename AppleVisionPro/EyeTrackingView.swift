@@ -301,13 +301,8 @@ struct EyeTrackingView: View {
             if backButtonPressProgress >= 1.0 {
                 activeVideo?.pause()
                 
-                // Determine navigation based on current mode
-                if isHeatmapDisplayMode {
-                    appState.eyeTrackingMode = .normal
-                    appState.currentPage = .test
-                } else {
-                    appState.currentPage = .videoUpload
-                }
+                appState.eyeTrackingMode = .normal
+                appState.currentPage = .test
                 
                 stopBackButtonPress()
             }

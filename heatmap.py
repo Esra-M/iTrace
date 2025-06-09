@@ -11,6 +11,8 @@ import subprocess
 import time
 from datetime import datetime
 import threading
+import socket
+from zeroconf import ServiceInfo, Zeroconf
 
 app = Flask(__name__)
 CORS(app)
@@ -18,6 +20,46 @@ CORS(app)
 current_recording_process = None
 current_recording_filepath = None
 OUTPUT_DIR = os.path.expanduser("~/Desktop/HeatmapRecordings")
+
+def get_local_ip():
+    """Get the local IP address of the Mac"""
+    try:
+        # Connect to a remote address to determine local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
+def register_service():
+    """Register the Flask service with Bonjour/mDNS"""
+    zeroconf = Zeroconf()
+    
+    # Get local IP and hostname
+    local_ip = get_local_ip()
+    hostname = socket.gethostname()
+    
+    # Create service info
+    service_name = "Vision Pro Heatmap Server"
+    service_type = "_visionpro._tcp.local."
+    service_port = 5555
+    
+    info = ServiceInfo(
+        service_type,
+        f"{service_name}.{service_type}",
+        addresses=[socket.inet_aton(local_ip)],
+        port=service_port,
+        properties={
+            'description': 'Apple Vision Pro Heatmap Generation Server',
+            'hostname': hostname
+        }
+    )
+    
+    zeroconf.register_service(info)
+    print(f"Service registered: {service_name} at {local_ip}:{service_port}")
+    return zeroconf, info
 
 def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
     # Reduce video quality for faster processing
@@ -262,4 +304,12 @@ def generate_heatmap_endpoint():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5555, debug=True)
+    # Register the service with Bonjour
+    zeroconf, service_info = register_service()
+    
+    try:
+        app.run(host='0.0.0.0', port=5555, debug=True)
+    finally:
+        # Cleanup
+        zeroconf.unregister_service(service_info)
+        zeroconf.close()
