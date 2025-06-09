@@ -12,10 +12,16 @@ struct BullseyeTestView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 30) {
-                Text("Tap the center of the circle")
+                Text("Percision")
                     .font(.largeTitle)
-                    .fontWeight(.bold)
+                    .bold()
                 
+                Text("Tap the center of the circle to determine the accuracy of your eye tracking")
+                    .font(.title)
+                    .foregroundStyle(.secondary)
+                    .padding()
+
+
                 ZStack {
                     ForEach(0..<5, id: \.self) { i in
                         let opacity: Double = 0.2 + (Double(i) * 0.2)
@@ -62,7 +68,7 @@ struct BullseyeTestView: View {
                 }
                 .frame(height: 40)
             }
-            .padding(.top, 100)
+            .padding(.top, 50)
             
             Button(action: {
                 appState.currentPage = .test

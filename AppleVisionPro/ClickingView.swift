@@ -11,6 +11,7 @@ struct ClickingView: View {
     @State private var clickCount = 0
     @State private var startTime: Date?
     @State private var endTime: Date?
+    @State private var showRestartButton = false
 
     let totalClicks = 20
 
@@ -31,8 +32,14 @@ struct ClickingView: View {
             
             VStack(spacing: 40) {
                 
-                Text("Click on the circle until it's full")
+                Text("Clicking Speed")
                     .font(.largeTitle)
+                    .bold()
+                
+                Text("Tap on the circle as fast as possible until it's full \n to measure your clicking speed for eye tracking")
+                    .font(.title)
+                    .foregroundStyle(.secondary)
+                    .padding()
                 
                 ZStack {
                     Circle()
@@ -43,7 +50,21 @@ struct ClickingView: View {
                     Circle()
                         .fill(Color.white)
                         .frame(width: innerCircleSize, height: innerCircleSize)
+                        .animation(.easeOut(duration: 0.2), value: clickCount)
                     
+                    if clickCount == totalClicks && showRestartButton {
+                        Button(action: restartTest) {
+                            Circle()
+                                .fill(.white)
+                                .frame(width: innerCircleSize, height: innerCircleSize)
+                                .overlay(
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 32, weight: .bold))
+                                        .foregroundColor(.black)
+                                )
+                        }
+                        .transition(.scale)
+                    }
                 }
                 .frame(width: 200, height: 200)
                 .gesture(
@@ -57,7 +78,8 @@ struct ClickingView: View {
                 VStack {
                     if clickCount == totalClicks, let start = startTime, let end = endTime {
                         let timeTaken = end.timeIntervalSince(start)
-                        Text("Time: \(String(format: "%.2f", timeTaken)) seconds")
+                        let clicksPerSecond = Double(totalClicks) / timeTaken
+                        Text("Speed: \(String(format: "%.2f", clicksPerSecond)) clicks/sec")
                             .font(.title2)
                     }
                 }
@@ -80,6 +102,21 @@ struct ClickingView: View {
         }
         if clickCount == totalClicks {
             endTime = Date()
+            // Add a 1.5 second delay before showing the restart button
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showRestartButton = true
+                }
+            }
+        }
+    }
+    
+    private func restartTest() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            clickCount = 0
+            startTime = nil
+            endTime = nil
+            showRestartButton = false
         }
     }
 }

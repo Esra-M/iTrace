@@ -31,6 +31,9 @@ struct EyeTrackingView: View {
     @State private var videoSize: CGSize = .zero
     @State private var videoRect: CGRect = .zero
     @State private var backgroundVid: Bool = false
+    @State private var currentTrackingData: [String: Any]?
+    @State private var sessionTimestamp: String = ""
+    @State private var showBackgroundButton = false
     
     @State private var backButtonPressProgress: CGFloat = 0
     @State private var backButtonTimer: Timer?
@@ -91,20 +94,41 @@ struct EyeTrackingView: View {
 
                 if isPreparingHeatmap {
                     Color.black.opacity(0.6).ignoresSafeArea()
+                    
                     VStack(spacing: 20) {
                         ProgressView("Generating Heatmap")
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .foregroundColor(.white)
                             .scaleEffect(1.5)
+                            .padding()
                         
-                        Button(action: {
-                            generateInBackground()
-                        }) {
-                            Text("Generate in Background")
-                                .font(.title2)
-                                .padding()
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(height: 60)
+                            .overlay(
+                                Group {
+                                    if showBackgroundButton {
+                                        Button(action: {
+                                            generateInBackground()
+                                        }) {
+                                            Text("Generate in Background")
+                                                .font(.title2)
+                                                .padding()
+                                        }
+                                        .transition(.opacity.combined(with: .scale))
+                                    }
+                                }
+                            )
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                showBackgroundButton = true
+                            }
                         }
-                        .padding()
+                    }
+                    .onDisappear {
+                        showBackgroundButton = false
                     }
                 }
 
@@ -116,63 +140,49 @@ struct EyeTrackingView: View {
                         .scaleEffect(1.5)
                 }
 
-                if activeVideo === originalVideo {
-                    ZStack {
-                        Circle()
-                            .trim(from: 0, to: backButtonPressProgress)
-                            .stroke(Color.white, lineWidth: 3)
-                            .frame(width: 60, height: 60)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.linear(duration: 0.1), value: backButtonPressProgress)
-                        
-                        Button(action: {}) {
-                            Image(systemName: "chevron.backward")
-                                .padding(20)
-                        }
+                // Universal back button with hold requirement
+                ZStack {
+                    Circle()
+                        .trim(from: 0, to: backButtonPressProgress)
+                        .stroke(Color.white, lineWidth: 3)
                         .frame(width: 60, height: 60)
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { _ in
-                                    if !isBackButtonPressed {
-                                        startBackButtonPress()
-                                        showHelpText = true
-                                        helpTimer?.invalidate()
-                                        helpTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
-                                            showHelpText = false
-                                        }
-                                    }
-                                }
-                                .onEnded { _ in
-                                    stopBackButtonPress()
-                                }
-                        )
-                        
-                        if showHelpText {
-                            Text("Press and Hold")
-                                .font(.system(size: 14))
-                                .padding(8)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                                .offset(y: 60)
-                        }
-                    }
-                    .onDisappear {
-                        helpTimer?.invalidate()
-                    }
-                    .offset(x: -580, y: -300)
-                } else if activeVideo != nil {
-                    Button(action: {
-                        activeVideo?.pause()
-                        appState.eyeTrackingMode = .normal
-                        appState.currentPage = .test
-                    }) {
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 0.1), value: backButtonPressProgress)
+                    
+                    Button(action: {}) {
                         Image(systemName: "chevron.backward")
                             .padding(20)
-
                     }
                     .frame(width: 60, height: 60)
-                    .offset(x: -580, y: -300)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if !isBackButtonPressed {
+                                    startBackButtonPress()
+                                    showHelpText = true
+                                    helpTimer?.invalidate()
+                                    helpTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                                        showHelpText = false
+                                    }
+                                }
+                            }
+                            .onEnded { _ in
+                                stopBackButtonPress()
+                            }
+                    )
                     
+                    if showHelpText {
+                        Text("Press and Hold")
+                            .font(.system(size: 14))
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            .offset(y: 60)
+                    }
                 }
+                .onDisappear {
+                    helpTimer?.invalidate()
+                }
+                .offset(x: -580, y: -300)
             }
             .onAppear {
                 viewSize = geometry.size
@@ -194,15 +204,15 @@ struct EyeTrackingView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .bottomOrnament) {
                     HStack {
-                        if !isHeatmapDisplayMode && originalVideo == activeVideo, let coords = pressedCoordinates {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Eye Tracking Data").font(.footnote).bold()
-                                Text(String(format: "Video Coords: (%.1f, %.1f)", coords.x, coords.y))
-                                    .font(.caption2).frame(width: 220, alignment: .leading)
-                                Text("Timestamp: \(formatTimestamp(videoTimestamp))")
-                                    .font(.system(size: 11))
-                            }
-                        }
+//                        if !isHeatmapDisplayMode && originalVideo == activeVideo, let coords = pressedCoordinates {
+//                            VStack(alignment: .leading, spacing: 4) {
+//                                Text("Eye Tracking Data").font(.footnote).bold()
+//                                Text(String(format: "Video Coords: (%.1f, %.1f)", coords.x, coords.y))
+//                                    .font(.caption2).frame(width: 220, alignment: .leading)
+//                                Text("Timestamp: \(formatTimestamp(videoTimestamp))")
+//                                    .font(.system(size: 11))
+//                            }
+//                        }
                         
                         Button {
                             isPlaying ? activeVideo?.pause() : activeVideo?.play()
@@ -290,8 +300,15 @@ struct EyeTrackingView: View {
             
             if backButtonPressProgress >= 1.0 {
                 activeVideo?.pause()
-                appState.eyeTrackingMode = .normal
-                appState.currentPage = .videoUpload
+                
+                // Determine navigation based on current mode
+                if isHeatmapDisplayMode {
+                    appState.eyeTrackingMode = .normal
+                    appState.currentPage = .test
+                } else {
+                    appState.currentPage = .videoUpload
+                }
+                
                 stopBackButtonPress()
             }
         }
@@ -439,8 +456,19 @@ struct EyeTrackingView: View {
             return
         }
         
-        let clicksPayload = tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
-
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        sessionTimestamp = formatter.string(from: Date())
+        
+        let trackingData = [
+            "user_name": appState.userName,
+            "video_name": appState.videoName,
+            "tracking_type": "video_eye_tracking",
+            "timestamp": sessionTimestamp,
+            "click_data": tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+        ] as [String : Any]
+        
+        currentTrackingData = trackingData
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -452,10 +480,10 @@ struct EyeTrackingView: View {
         var data = Data()
         
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: clicksPayload)
-            data.append(formData(boundary: boundary, name: "clicks", value: jsonData))
+            let jsonData = try JSONSerialization.data(withJSONObject: trackingData)
+            data.append(formData(boundary: boundary, name: "tracking_data", value: jsonData))
         } catch {
-            print("Error serializing click data: \(error)")
+            print("Error serializing tracking data: \(error)")
             isPreparingHeatmap = false
             return
         }
@@ -520,20 +548,38 @@ struct EyeTrackingView: View {
     private func exportVideo() {
         isExporting = true
         let videoURL = isHeatmapDisplayMode ? appState.heatmapVideoURL : heatmapExportedURL
-        let clickData = isHeatmapDisplayMode ?
-            appState.clickData.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] } :
-            tapHistory.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+        
+        let trackingData: [String: Any]
+        if isHeatmapDisplayMode {
+            trackingData = appState.spatialTrackingData ?? [:]
+        } else {
+            trackingData = currentTrackingData ?? [:]
+        }
         
         guard let exportedURL = videoURL else {
             isExporting = false
             return
         }
         
-        var itemsToShare: [Any] = [exportedURL]
+        let videoFilename = generateExportFilename(data: trackingData, extension: "mp4")
+        let jsonFilename = generateExportFilename(data: trackingData, extension: "json")
         
-        if !clickData.isEmpty,
-           let jsonData = try? JSONSerialization.data(withJSONObject: clickData, options: .prettyPrinted) {
-            let jsonURL = FileManager.default.temporaryDirectory.appendingPathComponent("clicks.json")
+        let tempVideoURL = FileManager.default.temporaryDirectory.appendingPathComponent(videoFilename)
+        
+        do {
+            let videoData = try Data(contentsOf: exportedURL)
+            try videoData.write(to: tempVideoURL)
+        } catch {
+            print("Error copying video file: \(error)")
+            isExporting = false
+            return
+        }
+        
+        var itemsToShare: [Any] = [tempVideoURL]
+        
+        if !trackingData.isEmpty,
+           let jsonData = try? JSONSerialization.data(withJSONObject: trackingData, options: .prettyPrinted) {
+            let jsonURL = FileManager.default.temporaryDirectory.appendingPathComponent(jsonFilename)
             try? jsonData.write(to: jsonURL)
             itemsToShare.append(jsonURL)
         }
@@ -548,6 +594,20 @@ struct EyeTrackingView: View {
             rootVC.present(activityVC, animated: true)
         }
         isExporting = false
+    }
+
+    private func generateExportFilename(data: [String: Any], extension: String) -> String {
+        let userName = (data["user_name"] as? String ?? "unknown_user").replacingOccurrences(of: " ", with: "_")
+        let timestamp = data["timestamp"] as? String ?? sessionTimestamp
+        let trackingType = data["tracking_type"] as? String ?? "unknown"
+        
+        if let videoName = data["video_name"] as? String {
+            let cleanVideoName = videoName.replacingOccurrences(of: " ", with: "_")
+            let nameWithoutExt = (cleanVideoName as NSString).deletingPathExtension
+            return "\(userName)_\(nameWithoutExt)_\(trackingType)_\(timestamp).\(`extension`)"
+        } else {
+            return "\(userName)_\(trackingType)_\(timestamp).\(`extension`)"
+        }
     }
     
     private func formatTime(_ seconds: Double) -> String {

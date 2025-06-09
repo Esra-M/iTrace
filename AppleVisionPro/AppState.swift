@@ -26,14 +26,17 @@ class AppState: ObservableObject {
         case normal
         case heatmapDisplay
     }
-    @Published var currentPage: WindowPage = .test
+    @Published var currentPage: WindowPage = .content
     
     @Published var serverIPAddress: String = "192.168.0.109:5555"
 
+    @Published var userName: String = ""
+    @Published var videoName: String = ""
     @Published var clickData: [ClickData] = []
     @Published var heatmapVideoURL: URL?
     @Published var uploadedVideoURL: URL?
     @Published var eyeTrackingMode: EyeTrackingMode = .normal
+    @Published var spatialTrackingData: [String: Any]?
 
     @Published var reachResult: String = ""
 }

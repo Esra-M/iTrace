@@ -29,6 +29,7 @@ struct ImmersiveTrackingView: View {
     @State private var isGeneratingHeatmap = false
     @State private var showPressHoldHint = false
     @State private var hintTimer: Timer?
+    @State private var showBackgroundButton = false
 
     @State private var screenResolution: CGSize = CGSize(width: 3600, height: 2338)
     
@@ -64,7 +65,7 @@ struct ImmersiveTrackingView: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.001))
                             .frame(width: frameSize.width, height: frameSize.height)
-                            .overlay(Rectangle().stroke(Color.blue, lineWidth: 5))
+                            .overlay(Rectangle().stroke(Color.blue, lineWidth: 0))
                             .contentShape(Rectangle())
                             .simultaneousGesture(
                                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
@@ -89,38 +90,57 @@ struct ImmersiveTrackingView: View {
                                     }
                             )
                         
-                        if let location = tapLocation {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 40, height: 40)
-                                .position(location)
-                        }
+//                        if let location = tapLocation {
+//                            Circle()
+//                                .fill(Color.red)
+//                                .frame(width: 40, height: 40)
+//                                .position(location)
+//                        }
                     }
                     
                     VStack(spacing: 0) {
                         if isGeneratingHeatmap {
                             VStack(spacing: 30) {
                                 Spacer()
+                                
                                 VStack(spacing: 20) {
                                     ProgressView().scaleEffect(2.0)
                                         .padding(.top, 30)
+                                    
                                     Text("Generating Heatmap")
                                         .font(.title)
                                         .fontWeight(.bold)
                                         .padding()
                                     
-                                    Button(action: {
-                                        generateInBackground()
-                                    }) {
-                                        Text("Generate in Background")
-                                            .font(.title2)
-                                            .padding()
+                                    VStack {
+                                        if showBackgroundButton {
+                                            Button(action: {
+                                                generateInBackground()
+                                            }) {
+                                                Text("Generate in Background")
+                                                    .font(.title2)
+                                                    .padding()
+                                            }
+                                            .transition(.opacity.combined(with: .scale))
+                                        }
                                     }
-                                    .padding()
+                                    .frame(height: 50)
                                 }
-                                .padding(50)
+                                .frame(width: 500)
+                                .padding(40)
                                 .glassBackgroundEffect()
                                 .cornerRadius(25)
+                                .onAppear {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            showBackgroundButton = true
+                                        }
+                                    }
+                                }
+                                .onDisappear {
+                                    showBackgroundButton = false
+                                }
+                                
                                 Spacer()
                             }
                         } else if isRecording {
@@ -194,7 +214,7 @@ struct ImmersiveTrackingView: View {
                                     hintTimer?.invalidate()
                                 }
                             }
-                            .padding(.top, 100)
+                            .padding(.top, 200)
                         } else {
                             Spacer()
                             VStack{
@@ -212,11 +232,17 @@ struct ImmersiveTrackingView: View {
                                     
                                 }
                                 .frame(width: 60, height: 60)
-                                .offset(x: -340, y: 10)
+                                .offset(x: -340, y: 20)
                                 
-                                Text("Before you start, enable View Mirroring")
+                                Text("Spacial Eye Tracking")
                                     .font(.largeTitle)
+                                    .bold()
+                                    
+                                
+                                Text("Before you continue, enable View Mirroring")
+                                    .font(.title)
                                     .padding(60)
+                                    .foregroundStyle(.secondary)
                                 
                                 Button(action: startScreenRecording) {
                                     HStack(spacing: 20) {
@@ -228,9 +254,9 @@ struct ImmersiveTrackingView: View {
                                     }
                                     .padding(20)
                                 }
-                                .padding(20)
+                                .padding(40)
                             }
-                            .frame(width: 800, height: 400)
+                            .frame(width: 800, height: 450)
                             .glassBackgroundEffect()
                         }
                         Spacer()
@@ -342,6 +368,17 @@ struct ImmersiveTrackingView: View {
             return
         }
         
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = formatter.string(from: Date())
+        
+        let trackingData = [
+            "user_name": appState.userName,
+            "tracking_type": "spatial_eye_tracking",
+            "timestamp": timestamp,
+            "click_data": clickDataArray.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+        ] as [String : Any]
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -349,7 +386,7 @@ struct ImmersiveTrackingView: View {
         
         let requestBody = [
             "stop": true,
-            "click_data": clickDataArray.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
+            "tracking_data": trackingData
         ] as [String : Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         
@@ -360,7 +397,7 @@ struct ImmersiveTrackingView: View {
                httpResponse.statusCode == 200,
                httpResponse.mimeType == "video/mp4" {
                 if !backgroundVid{
-                    await handleReceivedVideoData(data)
+                    await handleReceivedVideoData(data, trackingData: trackingData)
                 }
             } else {
                 await MainActor.run { isGeneratingHeatmap = false }
@@ -371,7 +408,7 @@ struct ImmersiveTrackingView: View {
         }
     }
     
-    private func handleReceivedVideoData(_ data: Data) async {
+    private func handleReceivedVideoData(_ data: Data, trackingData: [String: Any]) async {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("heatmap_\(UUID().uuidString).mp4")
         
@@ -384,6 +421,8 @@ struct ImmersiveTrackingView: View {
             await MainActor.run {
                 appState.heatmapVideoURL = tempURL
                 appState.clickData = clickDataArray
+                
+                appState.spatialTrackingData = trackingData
                 
                 appState.eyeTrackingMode = .heatmapDisplay
                 appState.currentPage = .eyeTracking

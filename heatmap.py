@@ -55,15 +55,47 @@ def create_heatmap_overlay(brightness_grid, video_width, video_height, base_sigm
         blurred = (blurred / np.max(blurred) * 255).astype(np.uint8)
     return cv2.applyColorMap(blurred, cv2.COLORMAP_INFERNO)
 
-def generate_heatmap(video_path, click_data):
-    # Generate heatmap video from click data
+def generate_filename(tracking_data, suffix=""):
+    """Generate filename based on tracking data with timestamp from JSON"""
+    # Use timestamp from tracking data if available, otherwise generate new one
+    timestamp = tracking_data.get('timestamp', datetime.now().strftime("%Y%m%d_%H%M%S"))
+    user_name = tracking_data.get('user_name', 'unknown_user').replace(' ', '_')
+    tracking_type = tracking_data.get('tracking_type', 'unknown')
+    
+    if tracking_data.get('video_name'):
+        video_name = os.path.splitext(tracking_data['video_name'])[0].replace(' ', '_')
+        base_name = f"{user_name}_{video_name}_{tracking_type}_{timestamp}"
+    else:
+        base_name = f"{user_name}_{tracking_type}_{timestamp}"
+    
+    return f"{base_name}{suffix}"
+
+def save_tracking_data(tracking_data, filename_base):
+    """Save tracking data as JSON file"""
     try:
-        print("Processing video...")
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        json_path = os.path.join(OUTPUT_DIR, f"{filename_base}_data.json")
+        
+        with open(json_path, 'w') as f:
+            json.dump(tracking_data, f, indent=2)
+        
+        return json_path
+    except Exception as e:
+        print(f"Error saving tracking data: {e}")
+        return None
+
+def generate_heatmap(video_path, tracking_data):
+    # Generate heatmap video from tracking data
+    try:
         reduced_path, scale_x, scale_y = reduce_video_quality(video_path)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Generate filename based on tracking data (includes timestamp from JSON)
+        filename_base = generate_filename(tracking_data)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        output_path = os.path.join(OUTPUT_DIR, f"heatmap_{timestamp}.mp4")
+        output_path = os.path.join(OUTPUT_DIR, f"{filename_base}_heatmap.mp4")
+        
+        # Save tracking data JSON
+        save_tracking_data(tracking_data, filename_base)
         
         cap = cv2.VideoCapture(reduced_path)
         if not cap.isOpened(): return None
@@ -76,6 +108,7 @@ def generate_heatmap(video_path, click_data):
         fade_duration = int(fps * 0.3)
         
         # Process clicks and create brightness grid
+        click_data = tracking_data.get('click_data', [])
         brightness_per_frame = np.zeros((frame_count, h, w), dtype=np.float32)
         
         for click in click_data:
@@ -104,6 +137,8 @@ def generate_heatmap(video_path, click_data):
         batch_size = 50 if w * h < 1000000 else 25
         for i in range(0, frame_count, batch_size):
             batch_end = min(i + batch_size, frame_count)
+            progress = int((i / frame_count) * 100)
+            print(f"Video generation: {progress}%")
             
             for j in range(i, batch_end):
                 ret, frame = cap.read()
@@ -143,7 +178,7 @@ def generate_heatmap(video_path, click_data):
             try: os.unlink(reduced_path)
             except: pass
         
-        print("Heatmap generation completed!")
+        print("Heatmap generation completed")
         return output_path
         
     except Exception as e:
@@ -182,10 +217,8 @@ def stop_recording():
     
     try:
         data = request.get_json()
-        click_data = data.get('click_data', [])
-        
-        print(f"Received {len(click_data)} clicks")
-        
+        tracking_data = data.get('tracking_data', {})
+                
         if current_recording_process:
             current_recording_process.terminate()
             current_recording_process.wait()
@@ -193,7 +226,7 @@ def stop_recording():
             time.sleep(2)
             
             if current_recording_filepath and os.path.exists(current_recording_filepath):
-                heatmap_path = generate_heatmap(current_recording_filepath, click_data)
+                heatmap_path = generate_heatmap(current_recording_filepath, tracking_data)
                 os.unlink(current_recording_filepath)
                 
                 if heatmap_path:
@@ -212,14 +245,12 @@ def stop_recording():
 def generate_heatmap_endpoint():
     try:
         video_file = request.files['video']
-        clicks = json.loads(request.form.get('clicks'))
-        
-        print(f"Video received: {video_file.filename}")
-        
+        tracking_data = json.loads(request.form.get('tracking_data'))
+    
         temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         video_file.save(temp_input.name)
         
-        heatmap_path = generate_heatmap(temp_input.name, clicks)
+        heatmap_path = generate_heatmap(temp_input.name, tracking_data)
         os.unlink(temp_input.name)
         
         if heatmap_path:

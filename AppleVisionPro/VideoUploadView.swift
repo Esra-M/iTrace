@@ -26,11 +26,16 @@ struct VideoUploadView: View {
             .offset(x: -580, y: -300)
             .frame(width: 60, height: 60)
             
-            VStack(spacing: 100) {
+            VStack(spacing: 30) {
                 Text("Video Eye Tracking")
                     .font(.largeTitle)
                     .bold()
-
+                    .padding(.bottom, 100)
+                
+                Text("Upload a video that will be used for eye tracking")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                
                 VStack{
                     Button(action: {
                         showingDocumentPicker = true
@@ -58,16 +63,16 @@ struct VideoUploadView: View {
                 
                 Button(action: {
                     appState.currentPage = .eyeTracking
+                    appState.videoName = selectedVideoName
                 }) {
                     Text("Start")
                         .font(.title)
                         .padding()
                 }
                 .disabled(isVideoSelected == false)
-                
-                
+                .padding(.top, 50)
             }
-            .padding(.top, 100)
+            .padding(.top, 50)
             .fileImporter(
                 isPresented: $showingDocumentPicker,
                 allowedContentTypes: [.movie, .quickTimeMovie, .mpeg4Movie],

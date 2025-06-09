@@ -10,60 +10,54 @@ import SwiftUI
 struct ContentView: View {
     
     @EnvironmentObject private var appState: AppState
+    @State private var userName: String = ""
+    @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
             VStack {
-                Text("Welcome to Usability Testing")
+                Text("Welcome to GazeNav")
                     .font(.largeTitle)
                     .bold()
-                    .padding()
                 
-                Text("In this application you will compare different interaction methods for the Apple Vision Pro")
-                    .font(.headline)
-                    .padding(.bottom, 100)
-                    
-                HStack(spacing: 100) {
-                    VStack{
-                        Image(systemName: "keyboard.badge.ellipsis")
-                            .font(.system(size: 50))
-                        Text("Keyboard & Mouse")
-                    }
-                    VStack{
-                        Image(systemName: "eye")
-                            .font(.system(size: 50))
-                        Text("Gaze")
-                    }
-                    VStack{
-                        Image(systemName: "hourglass.badge.eye")
-                            .font(.system(size: 50))
-                        Text("Dwell")
-                    }
-                    VStack{
-                        Image(systemName: "brain.filled.head.profile")
-                            .font(.system(size: 50))
-                        Text("Head")
-                    }
-                    VStack{
-                        Image(systemName: "hand.palm.facing")
-                            .font(.system(size: 50))
-                        Text("Wrist")
-                    }
-                    VStack{
-                        Image(systemName: "hand.point.up.left")
-                            .font(.system(size: 50))
-                        Text("Index Finger")
-                    }
-                }
-                .padding(.bottom, 100)
-                .font(.title3)
+                Text("In this application you can perform eye tracking \n on a video and in your surrounding environment")
+                    .font(.title)
+                    .padding(50)
+                    .multilineTextAlignment(.center)
                 
-                Button("Start") {
-                    
-                    appState.currentPage = .keyboard
-                }
-                .font(.title)
+                Text("Before you start, please enter your name:")
+                    .font(.title)
+                    .padding(.bottom, 10)
+                    .padding(.top, 20)
+                    .foregroundStyle(.secondary)
 
+                
+                TextField("Enter your name", text: $userName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 300)
+                    .padding(.bottom, 100)
+                    .focused($isTextFieldFocused)
+                    .onSubmit {
+                        if !userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            appState.userName = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            appState.currentPage = .test
+                        }
+                    }
+                
+                Button(action: {
+                    appState.userName = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    appState.currentPage = .test
+                }) {
+                    Text("Start")
+                        .font(.title)
+                        .padding()
+                }
+                .disabled(userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isTextFieldFocused = true
+                }
             }
         }
     }
