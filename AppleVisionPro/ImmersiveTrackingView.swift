@@ -135,7 +135,7 @@ struct ImmersiveTrackingView: View {
                                         .scaleEffect(1.2)
                                         .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isRecording)
                                     
-                                    Text("RECORDING...")
+                                    Text("RECORDING HEATMAP...")
                                         .font(.largeTitle)
                                         .fontWeight(.bold)
                                     
@@ -197,7 +197,7 @@ struct ImmersiveTrackingView: View {
                                     hintTimer?.invalidate()
                                 }
                             }
-                            .padding(.top, 200)
+                            .padding(.top, 300)
                         } else {
                             Spacer()
                             VStack{
@@ -220,18 +220,21 @@ struct ImmersiveTrackingView: View {
                                 Text("Spacial Eye Tracking")
                                     .font(.largeTitle)
                                     .bold()
-                                    
                                 
-                                Text("Before you continue, enable View Mirroring")
+                                Text("Track where you look in your surrounding environment")
                                     .font(.title)
-                                    .padding(60)
+                                    .padding(20)
+                                    
+                                Text("Make sure View Mirroring is enabled")
+                                    .font(.title2)
+                                    .padding(20)
                                     .foregroundStyle(.secondary)
                                 
                                 Button(action: startScreenRecording) {
                                     HStack(spacing: 20) {
                                         Image(systemName: "record.circle")
                                             .font(.system(size: 40))
-                                        Text("START")
+                                        Text("START RECORDING")
                                             .font(.largeTitle)
                                             .fontWeight(.bold)
                                     }
@@ -357,6 +360,9 @@ struct ImmersiveTrackingView: View {
         
         let trackingData = [
             "user_name": appState.userName,
+            "user_age": appState.userAge,
+            "user_gender": appState.userGender,
+            "precision_score": appState.precisionScore,
             "tracking_type": "spatial_eye_tracking",
             "timestamp": timestamp,
             "click_data": clickDataArray.map { ["x": $0.x, "y": $0.y, "timestamp": $0.timestamp] }
@@ -412,7 +418,7 @@ struct ImmersiveTrackingView: View {
                 
                 isGeneratingHeatmap = false
                 
-                openWindow(id: "main")
+                openWindow(id: "eyeTrackingWindow")
             }
             
         } catch {

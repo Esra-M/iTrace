@@ -140,7 +140,6 @@ struct EyeTrackingView: View {
                         .scaleEffect(1.5)
                 }
 
-                // Universal back button with hold requirement
                 ZStack {
                     Circle()
                         .trim(from: 0, to: backButtonPressProgress)
@@ -457,6 +456,9 @@ struct EyeTrackingView: View {
         
         let trackingData = [
             "user_name": appState.userName,
+            "user_age": appState.userAge,
+            "user_gender": appState.userGender,
+            "precision_score": appState.precisionScore,
             "video_name": appState.videoName,
             "tracking_type": "video_eye_tracking",
             "timestamp": sessionTimestamp,

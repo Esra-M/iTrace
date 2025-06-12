@@ -2,8 +2,10 @@ import SwiftUI
 
 struct BullseyeTestView: View {
     @State private var lastTapLocation: CGPoint = .zero
+    @State private var showCurrentDot = false
     @State private var showResult = false
     @State private var precision: Double = 0.0
+    @State private var attempts: [Double] = []
     
     @EnvironmentObject var appState: AppState
     
@@ -11,15 +13,21 @@ struct BullseyeTestView: View {
     
     var body: some View {
         ZStack {
-            VStack(spacing: 30) {
-                Text("Percision")
+            VStack() {
+                Text("Precision")
                     .font(.largeTitle)
                     .bold()
+                    .padding(.bottom, 30)
                 
                 Text("Tap the center of the circle to determine the accuracy of your eye tracking")
                     .font(.title)
                     .foregroundStyle(.secondary)
-                    .padding()
+                    .padding(.bottom, 10)
+                
+                Text("Average of 5 attempts")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 30)
 
 
                 ZStack {
@@ -42,7 +50,7 @@ struct BullseyeTestView: View {
                             .frame(width: 2, height: 20)
                     }
                     
-                    if showResult {
+                    if showCurrentDot {
                         Circle()
                             .fill(Color.red)
                             .frame(width: 20, height: 20)
@@ -52,11 +60,28 @@ struct BullseyeTestView: View {
                 .frame(width: bullseyeRadius * 2, height: bullseyeRadius * 2)
                 .contentShape(Circle())
                 .onTapGesture { location in
+                    guard attempts.count < 5 else { return }
+                    
                     lastTapLocation = location
+                    showCurrentDot = true
+                    
                     let center = CGPoint(x: bullseyeRadius, y: bullseyeRadius)
                     let distance = sqrt(pow(location.x - center.x, 2) + pow(location.y - center.y, 2))
-                    precision = max(0.0, (1.0 - Double(distance / bullseyeRadius)) * 100.0)
-                    showResult = true
+                    let currentPrecision = max(0.0, (1.0 - Double(distance / bullseyeRadius)) * 100.0)
+                    
+                    attempts.append(currentPrecision)
+                    
+                    if attempts.count < 5 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            showCurrentDot = false
+                        }
+                    }
+                    
+                    if attempts.count == 5 {
+                        precision = attempts.reduce(0, +) / 5.0
+                        appState.precisionScore = precision
+                        showResult = true
+                    }
                 }
                 
                 VStack {

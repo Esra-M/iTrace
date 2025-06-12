@@ -11,52 +11,110 @@ struct ContentView: View {
     
     @EnvironmentObject private var appState: AppState
     @State private var userName: String = ""
-    @FocusState private var isTextFieldFocused: Bool
+    @State private var userAge: String = ""
+    @State private var selectedGender: Gender = .male
+    @FocusState private var isNameFieldFocused: Bool
+    @FocusState private var isAgeFieldFocused: Bool
+    
+    enum Gender: String, CaseIterable {
+        case male = "Male"
+        case female = "Female"
+        case other = "Other"
+    }
+    
+    private var isFormValid: Bool {
+        !userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !userAge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        Int(userAge) != nil &&
+        Int(userAge)! > 0 &&
+        Int(userAge)! < 150
+    }
 
     var body: some View {
         NavigationStack {
-            VStack {
+            VStack(spacing: 20) {
                 Text("Welcome to GazeNav")
                     .font(.largeTitle)
                     .bold()
                 
                 Text("In this application you can perform eye tracking \n on a video and in your surrounding environment")
                     .font(.title)
-                    .padding(50)
+                    .padding(.horizontal, 50)
                     .multilineTextAlignment(.center)
                 
-                Text("Before you start, please enter your name:")
-                    .font(.title)
-                    .padding(.bottom, 10)
+                Text("Before you start, please enter your information:")
+                    .font(.title2)
                     .padding(.top, 20)
                     .foregroundStyle(.secondary)
-
                 
-                TextField("Enter your name", text: $userName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 300)
-                    .padding(.bottom, 100)
-                    .focused($isTextFieldFocused)
-                    .onSubmit {
-                        if !userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            appState.userName = userName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            appState.currentPage = .test
-                        }
+                VStack(spacing: 15) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Name")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        
+                        TextField("Enter your name", text: $userName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 300)
+                            .focused($isNameFieldFocused)
+                            .onSubmit {
+                                isAgeFieldFocused = true
+                            }
                     }
+                    
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Age")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        
+                        TextField("Enter your age", text: $userAge)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 300)
+                            .keyboardType(.numberPad)
+                            .focused($isAgeFieldFocused)
+                            .onChange(of: userAge) { _, newValue in
+                                userAge = newValue.filter { $0.isNumber }
+                            }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Gender")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        
+                        Picker("Gender", selection: $selectedGender) {
+                            ForEach(Gender.allCases, id: \.self) { gender in
+                                Text(gender.rawValue).tag(gender)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 300)
+                    }
+                    .padding()
+                }
+                .padding(.horizontal, 40)
+                
                 
                 Button(action: {
-                    appState.userName = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedName = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedAge = userAge.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    appState.userName = trimmedName
+                    appState.userAge = Int(trimmedAge) ?? 0
+                    appState.userGender = selectedGender.rawValue
                     appState.currentPage = .test
+                    appState.precisionScore = 0
                 }) {
                     Text("Start")
                         .font(.title)
                         .padding()
                 }
-                .disabled(userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!isFormValid)
+                
             }
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    isTextFieldFocused = true
+                    isNameFieldFocused = true
                 }
             }
         }

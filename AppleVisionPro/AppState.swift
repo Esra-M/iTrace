@@ -38,6 +38,10 @@ class AppState: ObservableObject {
     @Published var eyeTrackingMode: EyeTrackingMode = .normal
     @Published var spatialTrackingData: [String: Any]?
     @Published var reachResult: String = ""
+    @Published var userAge: Int = 0
+    @Published var userGender: String = ""
+    @Published var precisionScore: Double = 0.0
+    @Published var eyeTrackingWindowSize: CGSize?
     
     private var browser: NWBrowser?
     

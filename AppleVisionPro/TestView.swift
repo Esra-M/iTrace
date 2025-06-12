@@ -33,7 +33,7 @@ struct TestView: View {
                     .font(.largeTitle)
                     .bold()
                 
-                HStack(spacing: 50){
+                HStack(spacing: 30){
                     //                VStack{
                     //                    Image(systemName: "character.cursor.ibeam")
                     //                        .font(.system(size: 50))
@@ -78,14 +78,12 @@ struct TestView: View {
                     //                .frame(height: 150, alignment: .bottom)
                     
                     
-                    
-                    
                     VStack{
                         Image(systemName: "scope")
                             .font(.system(size: 45))
                             .padding()
                         
-                        Button("Percision") {
+                        Button("Precision") {
                             appState.currentPage = .bullseyeTest
                         }
                     }
@@ -129,6 +127,21 @@ struct TestView: View {
                     }
                     .frame(height: 150, alignment: .bottom)
                     
+                    
+                    VStack{
+                        Image(systemName:"xmark.triangle.circle.square.fill")
+                            .font(.system(size: 45))
+                            .padding()
+                        
+                        Button("Object Detection") {
+                            Task{
+                                await openImmersiveSpace(id: "objectDetection")
+                                dismissWindow(id: "main")
+                            }
+                        }
+                        
+                    }
+                    .frame(height: 150, alignment: .bottom)
                 }
             }
         }

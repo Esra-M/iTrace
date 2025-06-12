@@ -30,11 +30,10 @@ struct VideoUploadView: View {
                 Text("Video Eye Tracking")
                     .font(.largeTitle)
                     .bold()
-                    .padding(.bottom, 100)
                 
-                Text("Upload a video that will be used for eye tracking")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
+                Text("Track where you look while watching videos")
+                    .font(.title)
+                    .padding(50)
                 
                 VStack{
                     Button(action: {
@@ -54,6 +53,7 @@ struct VideoUploadView: View {
                         Text("Video Selected: " + selectedVideoName)
                             .font(.title2)
                             .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
                     } else {
                         Text("No video selected")
                             .font(.title3)

@@ -45,6 +45,13 @@ struct AppleVisionProApp: App {
         }
         .windowStyle(.plain)
         
+        
+        ImmersiveSpace(id: "objectDetection") {
+            ObjectDetectionView()
+                .environmentObject(appState)
+        }
+        .windowStyle(.plain)
+        
 
         ImmersiveSpace(id: "selectionObject") {
             SelectionObjectsView()

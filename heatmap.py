@@ -13,18 +13,160 @@ from datetime import datetime
 import threading
 import socket
 from zeroconf import ServiceInfo, Zeroconf
+import uuid
+from zeroconf import ServiceInfo, Zeroconf
+from zeroconf._exceptions import NonUniqueNameException
+
+
+# Object detection imports
+try:
+    import torch
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+    print("YOLO model loaded successfully")
+except ImportError:
+    YOLO_AVAILABLE = False
+    print("YOLO not available. Install ultralytics: pip install ultralytics")
 
 app = Flask(__name__)
 CORS(app)
 
 current_recording_process = None
 current_recording_filepath = None
+detection_model = None
+detection_active = False
 OUTPUT_DIR = os.path.expanduser("~/Desktop/HeatmapRecordings")
+
+def initialize_yolo_model():
+    """Initialize YOLO model for object detection"""
+    global detection_model
+    if YOLO_AVAILABLE and detection_model is None:
+        try:
+            # Download and load YOLOv8 model (can use yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt, yolov8x.pt)
+            detection_model = YOLO('yolov8n.pt')  # nano version for faster detection
+            print("YOLO model initialized successfully")
+            return True
+        except Exception as e:
+            print(f"Failed to initialize YOLO model: {e}")
+            return False
+    return YOLO_AVAILABLE
+
+def capture_screen_region(x_percent, y_percent, region_size=400):
+    """Capture a region around the click coordinates"""
+    try:
+        # Take a screenshot using ffmpeg
+        temp_screenshot = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        cmd = ['ffmpeg', '-f', 'avfoundation', '-i', '1', '-frames:v', '1', 
+               '-vf', 'crop=iw:ih*0.865:0:ih*0.085', '-y', temp_screenshot.name]
+        
+        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        
+        if result.returncode == 0:
+            # Read the captured image
+            image = cv2.imread(temp_screenshot.name)
+            if image is not None:
+                h, w = image.shape[:2]
+                
+                # Calculate click position in pixel coordinates
+                click_x = int(x_percent * w)
+                click_y = int(y_percent * h)
+                
+                # Define region around click
+                half_region = region_size // 2
+                x1 = max(0, click_x - half_region)
+                y1 = max(0, click_y - half_region)
+                x2 = min(w, click_x + half_region)
+                y2 = min(h, click_y + half_region)
+                
+                # Extract region
+                region = image[y1:y2, x1:x2]
+                
+                # Clean up temp file
+                os.unlink(temp_screenshot.name)
+                
+                return region, (x1, y1, x2, y2), (w, h)
+        
+        # Clean up temp file if it exists
+        if os.path.exists(temp_screenshot.name):
+            os.unlink(temp_screenshot.name)
+            
+    except Exception as e:
+        print(f"Error capturing screen region: {e}")
+    
+    return None, None, None
+
+def detect_objects_in_region(image_region, region_coords, screen_size):
+    """Detect objects in the given image region using YOLO"""
+    global detection_model
+    
+    if not YOLO_AVAILABLE or detection_model is None:
+        return []
+    
+    try:
+        # Run YOLO detection
+        results = detection_model(image_region, conf=0.3)  # confidence threshold
+        
+        detections = []
+        region_x1, region_y1, region_x2, region_y2 = region_coords
+        screen_w, screen_h = screen_size
+        region_w = region_x2 - region_x1
+        region_h = region_y2 - region_y1
+        
+        for result in results:
+            boxes = result.boxes
+            if boxes is not None:
+                for box in boxes:
+                    # Get class name and confidence
+                    class_id = int(box.cls[0])
+                    class_name = detection_model.names[class_id]
+                    confidence = float(box.conf[0])
+                    
+                    # Get bounding box coordinates (x_center, y_center, width, height) in normalized coordinates
+                    x_center, y_center, bbox_w, bbox_h = box.xywhn[0].tolist()
+                    
+                    # Convert from region-relative coordinates to screen-relative coordinates
+                    # First convert to pixel coordinates within the region
+                    region_x_center = x_center * region_w
+                    region_y_center = y_center * region_h
+                    region_bbox_w = bbox_w * region_w
+                    region_bbox_h = bbox_h * region_h
+                    
+                    # Then convert to screen coordinates
+                    screen_x_center = (region_x1 + region_x_center) / screen_w
+                    screen_y_center = (region_y1 + region_y_center) / screen_h
+                    screen_bbox_w = region_bbox_w / screen_w
+                    screen_bbox_h = region_bbox_h / screen_h
+                    
+                    # Convert center coordinates to top-left coordinates
+                    screen_x = screen_x_center - (screen_bbox_w / 2)
+                    screen_y = screen_y_center - (screen_bbox_h / 2)
+                    
+                    detections.append({
+                        "name": class_name,
+                        "confidence": confidence,
+                        "bbox": {
+                            "x": max(0.0, min(1.0, screen_x)),
+                            "y": max(0.0, min(1.0, screen_y)),
+                            "width": max(0.0, min(1.0, screen_bbox_w)),
+                            "height": max(0.0, min(1.0, screen_bbox_h))
+                        }
+                    })
+                    
+                    print(f"Detected: {class_name} (confidence: {confidence:.2f}) at bbox: ({screen_x:.3f}, {screen_y:.3f}, {screen_bbox_w:.3f}, {screen_bbox_h:.3f})")
+        
+        # Sort by confidence
+        detections.sort(key=lambda x: x['confidence'], reverse=True)
+        
+        # Return top 5 detections
+        return detections[:5]
+        
+    except Exception as e:
+        print(f"Error in object detection: {e}")
+        return []
 
 def get_local_ip():
     """Get the local IP address of the Mac"""
     try:
-        # Connect to a remote address to determine local IP
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
@@ -34,35 +176,44 @@ def get_local_ip():
         return "127.0.0.1"
 
 def register_service():
-    """Register the Flask service with Bonjour/mDNS"""
-    zeroconf = Zeroconf()
+    """Register the Flask service with Bonjour/mDNS with error handling"""
+    try:
+        zeroconf = Zeroconf()
+        
+        # Get local IP and hostname
+        local_ip = get_local_ip()
+        hostname = socket.gethostname()
+        
+        # Create unique service name with UUID
+        unique_id = str(uuid.uuid4())[:8]
+        service_name = f"Vision Pro Heatmap Server {unique_id}"
+        service_type = "_visionpro._tcp.local."
+        service_port = 5555
+        
+        info = ServiceInfo(
+            service_type,
+            f"{service_name}.{service_type}",
+            addresses=[socket.inet_aton(local_ip)],
+            port=service_port,
+            properties={
+                'description': 'Apple Vision Pro Heatmap Generation Server',
+                'hostname': hostname,
+                'unique_id': unique_id
+            }
+        )
+        
+        zeroconf.register_service(info)
+        print(f"Service registered: {service_name} at {local_ip}:{service_port}")
+        return zeroconf, info
+        
     
-    # Get local IP and hostname
-    local_ip = get_local_ip()
-    hostname = socket.gethostname()
-    
-    # Create service info
-    service_name = "Vision Pro Heatmap Server"
-    service_type = "_visionpro._tcp.local."
-    service_port = 5555
-    
-    info = ServiceInfo(
-        service_type,
-        f"{service_name}.{service_type}",
-        addresses=[socket.inet_aton(local_ip)],
-        port=service_port,
-        properties={
-            'description': 'Apple Vision Pro Heatmap Generation Server',
-            'hostname': hostname
-        }
-    )
-    
-    zeroconf.register_service(info)
-    print(f"Service registered: {service_name} at {local_ip}:{service_port}")
-    return zeroconf, info
+    except Exception as e:
+        print(f"Failed to register Zeroconf service: {e}")
+        print("Continuing without service discovery...")
+        return None, None
+
 
 def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
-    # Reduce video quality for faster processing
     try:
         cap = cv2.VideoCapture(input_path)
         w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -84,12 +235,10 @@ def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
         return input_path, 1.0, 1.0
 
 def create_heatmap_overlay(brightness_grid, video_width, video_height, base_sigma=40, base_resolution=1920):
-    # Create heatmap overlay using OpenCV with resolution-scaled sigma
     if np.sum(brightness_grid) == 0: return None
     
     resolution_scale = video_width / base_resolution
     scaled_sigma = base_sigma * resolution_scale
-    
     scaled_sigma = max(scaled_sigma, 5.0)
     
     blurred = cv2.GaussianBlur(brightness_grid.astype(np.float32), (0, 0), scaled_sigma)
@@ -98,8 +247,6 @@ def create_heatmap_overlay(brightness_grid, video_width, video_height, base_sigm
     return cv2.applyColorMap(blurred, cv2.COLORMAP_INFERNO)
 
 def generate_filename(tracking_data, suffix=""):
-    """Generate filename based on tracking data with timestamp from JSON"""
-    # Use timestamp from tracking data if available, otherwise generate new one
     timestamp = tracking_data.get('timestamp', datetime.now().strftime("%Y%m%d_%H%M%S"))
     user_name = tracking_data.get('user_name', 'unknown_user').replace(' ', '_')
     tracking_type = tracking_data.get('tracking_type', 'unknown')
@@ -113,7 +260,6 @@ def generate_filename(tracking_data, suffix=""):
     return f"{base_name}{suffix}"
 
 def save_tracking_data(tracking_data, filename_base):
-    """Save tracking data as JSON file"""
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         json_path = os.path.join(OUTPUT_DIR, f"{filename_base}_data.json")
@@ -127,16 +273,13 @@ def save_tracking_data(tracking_data, filename_base):
         return None
 
 def generate_heatmap(video_path, tracking_data):
-    # Generate heatmap video from tracking data
     try:
         reduced_path, scale_x, scale_y = reduce_video_quality(video_path)
         
-        # Generate filename based on tracking data (includes timestamp from JSON)
         filename_base = generate_filename(tracking_data)
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         output_path = os.path.join(OUTPUT_DIR, f"{filename_base}_heatmap.mp4")
         
-        # Save tracking data JSON
         save_tracking_data(tracking_data, filename_base)
         
         cap = cv2.VideoCapture(reduced_path)
@@ -149,7 +292,6 @@ def generate_heatmap(video_path, tracking_data):
         out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
         fade_duration = int(fps * 0.3)
         
-        # Process clicks and create brightness grid
         click_data = tracking_data.get('click_data', [])
         brightness_per_frame = np.zeros((frame_count, h, w), dtype=np.float32)
         
@@ -170,12 +312,10 @@ def generate_heatmap(video_path, tracking_data):
             
             brightness_per_frame[frame_range, y, x] += brightness
         
-        # Normalize brightness
         max_brightness = np.max(brightness_per_frame)
         if max_brightness > 1.0:
             brightness_per_frame = np.sqrt(brightness_per_frame / max_brightness)
         
-        # Process frames
         batch_size = 50 if w * h < 1000000 else 25
         for i in range(0, frame_count, batch_size):
             batch_end = min(i + batch_size, frame_count)
@@ -196,7 +336,6 @@ def generate_heatmap(video_path, tracking_data):
                 
                 out.write(result)
         
-        # Add final heatmap frame
         final_grid = np.zeros((h, w), dtype=np.float32)
         for click in click_data:
             x, y = int(float(click["x"]) * w), int(float(click["y"]) * h)
@@ -215,7 +354,6 @@ def generate_heatmap(video_path, tracking_data):
         cap.release()
         out.release()
         
-        # Cleanup
         if reduced_path != video_path:
             try: os.unlink(reduced_path)
             except: pass
@@ -227,6 +365,78 @@ def generate_heatmap(video_path, tracking_data):
         print(f"Error: {e}")
         return None
 
+# New detection endpoints
+@app.route('/start_detection', methods=['POST'])
+def start_detection():
+    global detection_active
+    
+    if not initialize_yolo_model():
+        return jsonify({"status": "error", "message": "Object detection not available"}), 500
+    
+    detection_active = True
+    print("Real-time detection mode activated")
+    return jsonify({"status": "success", "message": "Detection started"})
+
+@app.route('/stop_detection', methods=['POST'])
+def stop_detection():
+    global detection_active
+    detection_active = False
+    print("Real-time detection mode deactivated")
+    return jsonify({"status": "success", "message": "Detection stopped"})
+
+@app.route('/detect_object', methods=['POST'])
+def detect_object():
+    global detection_active
+    
+    if not detection_active:
+        return jsonify({"status": "error", "message": "Detection not active"}), 400
+    
+    if not YOLO_AVAILABLE or detection_model is None:
+        return jsonify({"status": "error", "message": "Object detection not available"}), 500
+    
+    try:
+        data = request.get_json()
+        x = data.get('x', 0.5)
+        y = data.get('y', 0.5)
+        timestamp = data.get('timestamp', time.time())
+        
+        print(f"Detection request at ({x:.3f}, {y:.3f})")
+        
+        # Capture screen region around click
+        image_region, region_coords, screen_size = capture_screen_region(x, y)
+        
+        if image_region is None:
+            return jsonify({
+                "status": "error", 
+                "message": "Failed to capture screen region",
+                "detections": []
+            }), 500
+        
+        # Detect objects in the region
+        detections = detect_objects_in_region(image_region, region_coords, screen_size)
+        
+        # Log detections
+        if detections:
+            print(f"Detections found: {[d['name'] for d in detections]}")
+        else:
+            print("No objects detected in region")
+        
+        return jsonify({
+            "status": "success",
+            "detections": detections,
+            "region_coords": region_coords,
+            "screen_size": screen_size
+        })
+        
+    except Exception as e:
+        print(f"Error in object detection: {e}")
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "detections": []
+        }), 500
+
+# Existing endpoints
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
     global current_recording_process, current_recording_filepath
@@ -304,10 +514,15 @@ def generate_heatmap_endpoint():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
+    # Initialize YOLO model on startup
+    print("Initializing object detection model...")
+    initialize_yolo_model()
+    
     # Register the service with Bonjour
     zeroconf, service_info = register_service()
     
     try:
+        print(f"Server starting on {get_local_ip()}:5555")
         app.run(host='0.0.0.0', port=5555, debug=True)
     finally:
         # Cleanup
