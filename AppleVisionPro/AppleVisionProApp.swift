@@ -12,32 +12,40 @@ struct AppleVisionProApp: App {
                 switch appState.currentPage {
                 case .content:
                     ContentView()
+                        .frame(width: 1280, height: 720)
                 case .keyboard:
                     KeyboardView()
+                        .frame(width: 1280, height: 720)
                 case .test:
                     TestView()
+                        .frame(width: 1280, height: 720)
                 case .type:
                     TypingView()
+                        .frame(width: 1280, height: 720)
                 case .click:
                     ClickingView()
+                        .frame(width: 1280, height: 720)
                 case .reach:
                     ReachView()
+                        .frame(width: 1280, height: 720)
                 case .select:
                     SelectionView()
+                        .frame(width: 1280, height: 720)
                 case .eyeTracking:
                     EyeTrackingView()
-                        .frame(
-                            minWidth: 1280, maxWidth: 1280,
-                            minHeight: 720, maxHeight: 720)
+                        .frame(width: 1280, height: 720)
                 case .bullseyeTest:
                     BullseyeTestView()
+                        .frame(width: 1280, height: 720)
                 case .videoUpload:
                     VideoUploadView()
+                        .frame(width: 1280, height: 720)
                 }
             }
             .environmentObject(appState)
             .animation(.easeInOut, value: appState.currentPage)
         }
+        .windowResizability(.contentSize)
 
         ImmersiveSpace(id: "immersiveTracking") {
             ImmersiveTrackingView()

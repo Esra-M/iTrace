@@ -25,7 +25,7 @@ class AppState: ObservableObject {
     
     enum EyeTrackingMode {
         case normal
-        case heatmapDisplay
+        case display
     }
     
     @Published var currentPage: WindowPage = .content
@@ -33,10 +33,10 @@ class AppState: ObservableObject {
     @Published var userName: String = ""
     @Published var videoName: String = ""
     @Published var clickData: [ClickData] = []
-    @Published var heatmapVideoURL: URL?
+    @Published var VideoURL: URL?
     @Published var uploadedVideoURL: URL?
     @Published var eyeTrackingMode: EyeTrackingMode = .normal
-    @Published var spatialTrackingData: [String: Any]?
+    @Published var videoData: [String: Any]?
     @Published var reachResult: String = ""
     @Published var userAge: Int = 0
     @Published var userGender: String = ""

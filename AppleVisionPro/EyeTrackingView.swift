@@ -42,7 +42,7 @@ struct EyeTrackingView: View {
     @State private var helpTimer: Timer?
     
     private let backButtonPressDuration: Double = 2.0
-    private var isHeatmapDisplayMode: Bool { appState.eyeTrackingMode == .heatmapDisplay }
+    private var isHeatmapDisplayMode: Bool { appState.eyeTrackingMode == .display }
 
     var body: some View {
         GeometryReader { geometry in
@@ -153,6 +153,7 @@ struct EyeTrackingView: View {
                             .padding(20)
                     }
                     .frame(width: 60, height: 60)
+                    .foregroundColor(isBackButtonPressed ? .black : .primary) 
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { _ in
@@ -198,7 +199,7 @@ struct EyeTrackingView: View {
                 calculateVideoRect()
             }
             .onChange(of: appState.eyeTrackingMode) { _, newMode in
-                newMode == .heatmapDisplay ? setupHeatmapVideo() : setupNormalVideo()
+                newMode == .display ? setupHeatmapVideo() : setupNormalVideo()
             }
             .toolbar {
                 ToolbarItemGroup(placement: .bottomOrnament) {
@@ -256,7 +257,7 @@ struct EyeTrackingView: View {
                             .font(.caption2)
                             .frame(width: duration >= 3600 ? 150 : 100, alignment: .trailing)
 
-                        if (isHeatmapDisplayMode && appState.heatmapVideoURL != nil) || heatmapExportedURL != nil {
+                        if (isHeatmapDisplayMode && appState.VideoURL != nil) || heatmapExportedURL != nil {
                             Button {
                                 exportVideo()
                             } label: {
@@ -394,7 +395,7 @@ struct EyeTrackingView: View {
     }
     
     private func setupHeatmapVideo() {
-        guard let heatmapURL = appState.heatmapVideoURL else { return }
+        guard let heatmapURL = appState.VideoURL else { return }
         cleanupPlayerObserver()
         activeVideo = AVPlayer(url: heatmapURL)
         setupPlayerObserver()
@@ -544,11 +545,11 @@ struct EyeTrackingView: View {
     
     private func exportVideo() {
         isExporting = true
-        let videoURL = isHeatmapDisplayMode ? appState.heatmapVideoURL : heatmapExportedURL
+        let videoURL = isHeatmapDisplayMode ? appState.VideoURL : heatmapExportedURL
         
         let trackingData: [String: Any]
         if isHeatmapDisplayMode {
-            trackingData = appState.spatialTrackingData ?? [:]
+            trackingData = appState.videoData ?? [:]
         } else {
             trackingData = currentTrackingData ?? [:]
         }

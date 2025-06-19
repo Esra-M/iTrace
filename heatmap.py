@@ -16,6 +16,30 @@ from zeroconf import ServiceInfo, Zeroconf
 import uuid
 from zeroconf import ServiceInfo, Zeroconf
 from zeroconf._exceptions import NonUniqueNameException
+import queue
+import shutil
+
+OUTPUT_DIR = os.path.expanduser("~/Desktop/Experiment")
+current_recording_process = None
+current_recording_filepath = None
+detection_model = None
+detection_active = False
+detection_thread = None
+latest_detections = []
+detection_lock = threading.Lock()
+
+# Video stream analysis variables
+video_recording_process = None
+video_recording_filepath = None
+frame_queue = queue.Queue(maxsize=5)
+analysis_thread = None
+
+# Detection logging variables
+detection_session_data = []
+detection_session_lock = threading.Lock()
+detection_start_time = None
+detection_ready_time = None 
+system_initialized = False
 
 
 # Object detection imports
@@ -31,19 +55,12 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-current_recording_process = None
-current_recording_filepath = None
-detection_model = None
-detection_active = False
-OUTPUT_DIR = os.path.expanduser("~/Desktop/HeatmapRecordings")
-
 def initialize_yolo_model():
     """Initialize YOLO model for object detection"""
     global detection_model
     if YOLO_AVAILABLE and detection_model is None:
         try:
-            # Download and load YOLOv8 model (can use yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt, yolov8x.pt)
-            detection_model = YOLO('yolov8n.pt')  # nano version for faster detection
+            detection_model = YOLO('yolov8l.pt')
             print("YOLO model initialized successfully")
             return True
         except Exception as e:
@@ -51,66 +68,150 @@ def initialize_yolo_model():
             return False
     return YOLO_AVAILABLE
 
-def capture_screen_region(x_percent, y_percent, region_size=400):
-    """Capture a region around the click coordinates"""
+def start_video_recording_and_analysis():
+    """Start single video recording that saves to file AND provides frames for analysis"""
+    global video_recording_process, video_recording_filepath, frame_queue, detection_ready_time, system_initialized
+    
     try:
-        # Take a screenshot using ffmpeg
-        temp_screenshot = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        cmd = ['ffmpeg', '-f', 'avfoundation', '-i', '1', '-frames:v', '1', 
-               '-vf', 'crop=iw:ih*0.865:0:ih*0.085', '-y', temp_screenshot.name]
+        # Wait for system to be fully initialized before starting recording
+        initialization_time = 8 # static 8 seconds (TODO - make this dynamic)
+        print("Initializing detection system...")
+        time.sleep(initialization_time)
         
-        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        # Start recording 
+        detection_ready_time = time.time()
+        system_initialized = True
+        print("Detection system ready - starting video recording")
         
-        if result.returncode == 0:
-            # Read the captured image
-            image = cv2.imread(temp_screenshot.name)
-            if image is not None:
-                h, w = image.shape[:2]
-                
-                # Calculate click position in pixel coordinates
-                click_x = int(x_percent * w)
-                click_y = int(y_percent * h)
-                
-                # Define region around click
-                half_region = region_size // 2
-                x1 = max(0, click_x - half_region)
-                y1 = max(0, click_y - half_region)
-                x2 = min(w, click_x + half_region)
-                y2 = min(h, click_y + half_region)
-                
-                # Extract region
-                region = image[y1:y2, x1:x2]
-                
-                # Clean up temp file
-                os.unlink(temp_screenshot.name)
-                
-                return region, (x1, y1, x2, y2), (w, h)
+        # Create filename for video recording
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        video_recording_filepath = os.path.join(tempfile.gettempdir(), f"object_detection_recording_{timestamp}.mp4")
         
-        # Clean up temp file if it exists
-        if os.path.exists(temp_screenshot.name):
-            os.unlink(temp_screenshot.name)
+        # FFmpeg process
+        cmd = [
+            'ffmpeg',
+            '-f', 'avfoundation',
+            '-i', '1',
+            '-vf', 'crop=iw:ih*0.865:0:ih*0.085',
             
+            # Output recording to file
+            '-map', '0:v',
+            '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1920:1080',
+            '-r', '30',
+            '-vcodec', 'libx264',
+            '-preset', 'medium',
+            '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+            '-y', video_recording_filepath,
+            
+            # Output frames for analysis
+            '-map', '0:v',
+            '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1280:720',
+            '-r', '5', 
+            '-f', 'rawvideo',
+            '-pix_fmt', 'bgr24',
+            '-'
+        ]
+        
+        video_recording_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=10**8
+        )
+        
+        print(f"Video recording started: {video_recording_filepath}")
+        
+        # Read frames from stdout for analysis
+        frame_width, frame_height = 1280, 720
+        frame_size = frame_width * frame_height * 3 
+        
+        while detection_active and video_recording_process:
+            try:
+                # Read one frame from stdout
+                raw_frame = video_recording_process.stdout.read(frame_size)
+                
+                if len(raw_frame) != frame_size:
+                    break
+                
+                # Convert raw bytes to numpy array
+                frame = np.frombuffer(raw_frame, dtype=np.uint8)
+                frame = frame.reshape((frame_height, frame_width, 3))
+                
+                # Add frame to queue for analysis 
+                if not frame_queue.full():
+                    frame_queue.put(frame)
+                
+            except Exception as e:
+                print(f"Error reading analysis frame: {e}")
+                break
+                
     except Exception as e:
-        print(f"Error capturing screen region: {e}")
-    
-    return None, None, None
+        print(f"Error starting video recording and analysis: {e}")
 
-def detect_objects_in_region(image_region, region_coords, screen_size):
-    """Detect objects in the given image region using YOLO"""
-    global detection_model
+def stop_video_recording():
+    """Stop video recording and return the saved file path"""
+    global video_recording_process, video_recording_filepath
     
-    if not YOLO_AVAILABLE or detection_model is None:
+    if video_recording_process:
+        try:
+            video_recording_process.terminate()
+            video_recording_process.wait(timeout=10)
+            print("Video recording stopped")
+            return video_recording_filepath
+        except:
+            video_recording_process.kill()
+            return video_recording_filepath
+        finally:
+            video_recording_process = None
+    
+    return video_recording_filepath
+
+def save_recorded_video_to_desktop(user_data):
+    """Move the recorded video to desktop with proper naming"""
+    global video_recording_filepath
+    
+    if not video_recording_filepath or not os.path.exists(video_recording_filepath):
+        print("No recorded video file found")
+        return None
+    
+    try:
+        # Create output directory
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        user_name = user_data.get('user_name', 'unknown_user').replace(' ', '_')
+        video_filename = f"{user_name}_object_detection_{timestamp}.mp4"
+        final_video_path = os.path.join(OUTPUT_DIR, video_filename)
+        
+        # Move the recorded video to the final location
+        shutil.move(video_recording_filepath, final_video_path)
+        
+        print(f"Video saved to: {final_video_path}")
+        return final_video_path
+        
+    except Exception as e:
+        print(f"Error saving recorded video: {e}")
+        return None
+
+def detect_objects_in_frame(frame):
+    """Detect objects in a single video frame using YOLO"""
+    global detection_model, detection_session_data, detection_session_lock, detection_ready_time, system_initialized
+    
+    if not YOLO_AVAILABLE or detection_model is None or not system_initialized:
         return []
     
     try:
         # Run YOLO detection
-        results = detection_model(image_region, conf=0.3)  # confidence threshold
+        results = detection_model(frame, conf=0.25, iou=0.45, verbose=False)
         
         detections = []
-        region_x1, region_y1, region_x2, region_y2 = region_coords
-        screen_w, screen_h = screen_size
-        region_w = region_x2 - region_x1
-        region_h = region_y2 - region_y1
+        frame_h, frame_w = frame.shape[:2]
+        current_time = time.time()
+        
+        # Calculate video timestamp 
+        video_timestamp = current_time - detection_ready_time if detection_ready_time else 0
         
         for result in results:
             boxes = result.boxes
@@ -121,49 +222,137 @@ def detect_objects_in_region(image_region, region_coords, screen_size):
                     class_name = detection_model.names[class_id]
                     confidence = float(box.conf[0])
                     
-                    # Get bounding box coordinates (x_center, y_center, width, height) in normalized coordinates
+                    # Get bounding box coordinates in normalized coordinates
                     x_center, y_center, bbox_w, bbox_h = box.xywhn[0].tolist()
                     
-                    # Convert from region-relative coordinates to screen-relative coordinates
-                    # First convert to pixel coordinates within the region
-                    region_x_center = x_center * region_w
-                    region_y_center = y_center * region_h
-                    region_bbox_w = bbox_w * region_w
-                    region_bbox_h = bbox_h * region_h
-                    
-                    # Then convert to screen coordinates
-                    screen_x_center = (region_x1 + region_x_center) / screen_w
-                    screen_y_center = (region_y1 + region_y_center) / screen_h
-                    screen_bbox_w = region_bbox_w / screen_w
-                    screen_bbox_h = region_bbox_h / screen_h
-                    
                     # Convert center coordinates to top-left coordinates
-                    screen_x = screen_x_center - (screen_bbox_w / 2)
-                    screen_y = screen_y_center - (screen_bbox_h / 2)
+                    screen_x = x_center - (bbox_w / 2)
+                    screen_y = y_center - (bbox_h / 2)
                     
-                    detections.append({
-                        "name": class_name,
-                        "confidence": confidence,
-                        "bbox": {
-                            "x": max(0.0, min(1.0, screen_x)),
-                            "y": max(0.0, min(1.0, screen_y)),
-                            "width": max(0.0, min(1.0, screen_bbox_w)),
-                            "height": max(0.0, min(1.0, screen_bbox_h))
+                    # Ensure bounding boxes are within bounds
+                    screen_x = max(0.0, min(1.0, screen_x))
+                    screen_y = max(0.0, min(1.0, screen_y))
+                    bbox_w = max(0.0, min(1.0 - screen_x, bbox_w))
+                    bbox_h = max(0.0, min(1.0 - screen_y, bbox_h))
+                    
+                    # Only include detections with reasonable size
+                    min_size = 0.01 
+                    if bbox_w >= min_size and bbox_h >= min_size:
+                        detection_data = {
+                            "name": class_name,
+                            "confidence": confidence,
+                            "bbox": {
+                                "x": screen_x,
+                                "y": screen_y,
+                                "width": bbox_w,
+                                "height": bbox_h
+                            }
                         }
-                    })
-                    
-                    print(f"Detected: {class_name} (confidence: {confidence:.2f}) at bbox: ({screen_x:.3f}, {screen_y:.3f}, {screen_bbox_w:.3f}, {screen_bbox_h:.3f})")
+                        detections.append(detection_data)
+                        
+                        # Log detection session data for the json file
+                        with detection_session_lock:
+                            detection_session_data.append({
+                                "object_name": class_name,
+                                "confidence": confidence,
+                                "timestamp": round(video_timestamp, 2),
+                                "bounding_box": {
+                                    "x": screen_x,
+                                    "y": screen_y,
+                                    "width": bbox_w,
+                                    "height": bbox_h
+                                }
+                            })
         
-        # Sort by confidence
+        # Sort by confidence and return top detections
         detections.sort(key=lambda x: x['confidence'], reverse=True)
-        
-        # Return top 5 detections
-        return detections[:5]
+        return detections[:15]
         
     except Exception as e:
         print(f"Error in object detection: {e}")
         return []
 
+def continuous_video_analysis():
+    """Continuously analyze video frames for object detection"""
+    global detection_active, latest_detections, detection_lock, frame_queue
+    
+    print("Starting continuous video analysis...")
+    
+    while detection_active:
+        try:
+            # Get the latest frame from queue
+            if not frame_queue.empty():
+                # Get the most recent frame, discard older ones
+                frame = None
+                while not frame_queue.empty():
+                    frame = frame_queue.get()
+                
+                if frame is not None:
+                    # Detect objects in the frame
+                    detections = detect_objects_in_frame(frame)
+                    
+                    # Update latest detections
+                    with detection_lock:
+                        latest_detections = detections
+                    
+                    if system_initialized:
+                        print(f"Video frame analysis: {len(detections)} objects found")
+            else:
+                # No frames available, wait a bit
+                time.sleep(0.1)
+                
+        except Exception as e:
+            print(f"Error in video analysis: {e}")
+            time.sleep(1.0)
+
+def get_unique_objects(detection_data):
+    """Get unique object names from detection session data"""
+    unique_objects = set()
+    for detection in detection_data:
+        unique_objects.add(detection["object_name"])
+    return list(unique_objects)
+
+def save_detection_session_data(user_data, video_path):
+    """Save comprehensive detection session data"""
+    global detection_session_data, detection_session_lock
+    
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        
+        # Get session data for the json file
+        with detection_session_lock:
+            session_detections = detection_session_data.copy()
+        
+        # Get unique objects
+        unique_objects = get_unique_objects(session_detections)
+        
+        # Create simplified session data
+        session_data = {
+            "detection_type": "object_detection",
+            "user_name": user_data.get('user_name', 'unknown_user'),
+            "user_gender": user_data.get('user_gender', 'Unknown'),
+            "user_age": user_data.get('user_age', 0),
+            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "unique_objects": unique_objects,
+            "detected_objects": session_detections
+        }
+        
+        # Save to JSON file 
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        user_name = user_data.get('user_name', 'unknown_user').replace(' ', '_')
+        json_filename = f"{user_name}_object_detection_{timestamp}.json"
+        json_path = os.path.join(OUTPUT_DIR, json_filename)
+        
+        with open(json_path, 'w') as f:
+            json.dump(session_data, f, indent=2)
+        
+        print(f"Detection session data saved to: {json_path}")
+        return json_path
+        
+    except Exception as e:
+        print(f"Error saving detection session data: {e}")
+        return None
+    
 def get_local_ip():
     """Get the local IP address of the Mac"""
     try:
@@ -180,13 +369,11 @@ def register_service():
     try:
         zeroconf = Zeroconf()
         
-        # Get local IP and hostname
         local_ip = get_local_ip()
         hostname = socket.gethostname()
         
-        # Create unique service name with UUID
         unique_id = str(uuid.uuid4())[:8]
-        service_name = f"Vision Pro Heatmap Server {unique_id}"
+        service_name = f"Vision Pro Server {unique_id}"
         service_type = "_visionpro._tcp.local."
         service_port = 5555
         
@@ -206,12 +393,186 @@ def register_service():
         print(f"Service registered: {service_name} at {local_ip}:{service_port}")
         return zeroconf, info
         
-    
     except Exception as e:
         print(f"Failed to register Zeroconf service: {e}")
         print("Continuing without service discovery...")
         return None, None
 
+@app.route('/start_detection', methods=['POST'])
+def start_detection():
+    global detection_active, analysis_thread, frame_queue, detection_session_data, detection_start_time, detection_ready_time, system_initialized
+    
+    if not initialize_yolo_model():
+        return jsonify({"status": "error", "message": "Object detection not available"}), 500
+    
+    if not detection_active:
+        detection_active = True
+        detection_start_time = time.time()
+        detection_ready_time = None
+        system_initialized = False
+        
+        # Clear detection session data
+        with detection_session_lock:
+            detection_session_data.clear()
+        
+        # Clear the frame queue
+        while not frame_queue.empty():
+            try:
+                frame_queue.get_nowait()
+            except:
+                break
+        
+        # Start single process for recording and analysis
+        recording_thread = threading.Thread(target=start_video_recording_and_analysis, daemon=True)
+        recording_thread.start()
+        
+        # Start video analysis thread
+        analysis_thread = threading.Thread(target=continuous_video_analysis, daemon=True)
+        analysis_thread.start()
+        
+        print("Detection initialization started")
+    
+    return jsonify({"status": "success", "message": "Detection started"})
+
+
+@app.route('/stop_detection', methods=['POST'])
+def stop_detection():
+    global detection_active, latest_detections, detection_lock, detection_start_time, detection_ready_time, system_initialized
+    
+    detection_active = False
+    system_initialized = False
+    
+    # Stop video recording process
+    recorded_video_path = stop_video_recording()
+    
+    # Clear live detections
+    with detection_lock:
+        latest_detections = []
+    
+    # Clear frame queue
+    while not frame_queue.empty():
+        try:
+            frame_queue.get_nowait()
+        except:
+            break
+    
+    # Get user data from request
+    try:
+        data = request.get_json()
+        tracking_data = data.get('tracking_data', {})
+        return_video = data.get('return_video', False)
+    except:
+        tracking_data = {}
+        return_video = False
+    
+    # Always save the recorded video to desktop first
+    saved_video_path = save_recorded_video_to_desktop(tracking_data)
+    
+    # Save detection session data
+    session_json_path = save_detection_session_data(tracking_data, saved_video_path)
+    
+    print("Video recording and analysis stopped")
+    
+    # If return_video is True, return the video file directly
+    if return_video and saved_video_path and os.path.exists(saved_video_path):
+        # Read session data to include in response headers
+        session_data = {}
+        if session_json_path and os.path.exists(session_json_path):
+            try:
+                with open(session_json_path, 'r') as f:
+                    session_data = json.load(f)
+            except:
+                pass
+        
+        # Create a response with the video file
+        response = send_file(
+            saved_video_path, 
+            mimetype='video/mp4', 
+            download_name='object_detection_video.mp4'
+        )
+        
+        # Add session data as a custom header
+        if session_data:
+            response.headers['X-Session-Data'] = json.dumps(session_data)
+        
+        return response
+    else:
+        #return paths in JSON
+        response_data = {
+            "status": "success", 
+            "message": "Detection stopped and video saved"
+        }
+        
+        if saved_video_path:
+            response_data["video_path"] = saved_video_path
+            response_data["video_filename"] = os.path.basename(saved_video_path)
+        
+        if session_json_path:
+            response_data["session_data_path"] = session_json_path
+        
+        # Reset session variables
+        detection_start_time = None
+        detection_ready_time = None
+        
+        return jsonify(response_data)
+
+def save_detection_session_data(user_data, video_path):
+    """Save comprehensive detection session data"""
+    global detection_session_data, detection_session_lock
+    
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        
+        # Get session data
+        with detection_session_lock:
+            session_detections = detection_session_data.copy()
+        
+        # Get unique objects
+        unique_objects = get_unique_objects(session_detections)
+        
+        # Create simplified session data
+        session_data = {
+            "tracking_type": "object_detection",
+            "user_name": user_data.get('user_name', 'unknown_user'),
+            "user_gender": user_data.get('user_gender', 'Unknown'),
+            "user_age": user_data.get('user_age', 0),
+            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "unique_objects": unique_objects,
+            "detected_objects": session_detections
+        }
+        
+        # Save to JSON file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        user_name = user_data.get('user_name', 'unknown_user').replace(' ', '_')
+        json_filename = f"{user_name}_object_detection_{timestamp}.json"
+        json_path = os.path.join(OUTPUT_DIR, json_filename)
+        
+        with open(json_path, 'w') as f:
+            json.dump(session_data, f, indent=2)
+        
+        print(f"Detection session data saved to: {json_path}")
+        return json_path
+        
+    except Exception as e:
+        print(f"Error saving detection session data: {e}")
+        return None
+    
+@app.route('/get_detections', methods=['GET'])
+def get_detections():
+    """Get the latest detections from video analysis"""
+    global latest_detections, detection_lock
+    
+    if not detection_active:
+        return jsonify({"status": "error", "message": "Detection not active"}), 400
+    
+    with detection_lock:
+        detections = latest_detections.copy()
+    
+    return jsonify({
+        "status": "success",
+        "detections": detections,
+        "timestamp": time.time()
+    })
 
 def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
     try:
@@ -365,78 +726,6 @@ def generate_heatmap(video_path, tracking_data):
         print(f"Error: {e}")
         return None
 
-# New detection endpoints
-@app.route('/start_detection', methods=['POST'])
-def start_detection():
-    global detection_active
-    
-    if not initialize_yolo_model():
-        return jsonify({"status": "error", "message": "Object detection not available"}), 500
-    
-    detection_active = True
-    print("Real-time detection mode activated")
-    return jsonify({"status": "success", "message": "Detection started"})
-
-@app.route('/stop_detection', methods=['POST'])
-def stop_detection():
-    global detection_active
-    detection_active = False
-    print("Real-time detection mode deactivated")
-    return jsonify({"status": "success", "message": "Detection stopped"})
-
-@app.route('/detect_object', methods=['POST'])
-def detect_object():
-    global detection_active
-    
-    if not detection_active:
-        return jsonify({"status": "error", "message": "Detection not active"}), 400
-    
-    if not YOLO_AVAILABLE or detection_model is None:
-        return jsonify({"status": "error", "message": "Object detection not available"}), 500
-    
-    try:
-        data = request.get_json()
-        x = data.get('x', 0.5)
-        y = data.get('y', 0.5)
-        timestamp = data.get('timestamp', time.time())
-        
-        print(f"Detection request at ({x:.3f}, {y:.3f})")
-        
-        # Capture screen region around click
-        image_region, region_coords, screen_size = capture_screen_region(x, y)
-        
-        if image_region is None:
-            return jsonify({
-                "status": "error", 
-                "message": "Failed to capture screen region",
-                "detections": []
-            }), 500
-        
-        # Detect objects in the region
-        detections = detect_objects_in_region(image_region, region_coords, screen_size)
-        
-        # Log detections
-        if detections:
-            print(f"Detections found: {[d['name'] for d in detections]}")
-        else:
-            print("No objects detected in region")
-        
-        return jsonify({
-            "status": "success",
-            "detections": detections,
-            "region_coords": region_coords,
-            "screen_size": screen_size
-        })
-        
-    except Exception as e:
-        print(f"Error in object detection: {e}")
-        return jsonify({
-            "status": "error", 
-            "message": str(e),
-            "detections": []
-        }), 500
-
-# Existing endpoints
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
     global current_recording_process, current_recording_filepath
@@ -514,17 +803,14 @@ def generate_heatmap_endpoint():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    # Initialize YOLO model on startup
-    print("Initializing object detection model...")
     initialize_yolo_model()
     
-    # Register the service with Bonjour
     zeroconf, service_info = register_service()
     
     try:
         print(f"Server starting on {get_local_ip()}:5555")
         app.run(host='0.0.0.0', port=5555, debug=True)
     finally:
-        # Cleanup
-        zeroconf.unregister_service(service_info)
-        zeroconf.close()
+        if zeroconf and service_info:
+            zeroconf.unregister_service(service_info)
+            zeroconf.close()

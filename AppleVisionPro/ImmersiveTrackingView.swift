@@ -408,17 +408,17 @@ struct ImmersiveTrackingView: View {
             await dismissImmersiveSpace()
 
             await MainActor.run {
-                appState.heatmapVideoURL = tempURL
+                appState.VideoURL = tempURL
                 appState.clickData = clickDataArray
                 
-                appState.spatialTrackingData = trackingData
+                appState.videoData = trackingData
                 
-                appState.eyeTrackingMode = .heatmapDisplay
+                appState.eyeTrackingMode = .display
                 appState.currentPage = .eyeTracking
                 
                 isGeneratingHeatmap = false
                 
-                openWindow(id: "eyeTrackingWindow")
+                openWindow(id: "main")
             }
             
         } catch {
