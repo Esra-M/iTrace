@@ -37,7 +37,7 @@ struct ContentView: View {
                     .font(.largeTitle)
                     .bold()
                 
-                Text("In this application you can perform eye tracking \n on a video and in your surrounding environment")
+                Text("Track your gaze across videos and real-world environments, \n and detect objects in your surroundings")
                     .font(.title)
                     .padding(.horizontal, 50)
                     .multilineTextAlignment(.center)

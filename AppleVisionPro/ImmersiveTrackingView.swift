@@ -135,16 +135,9 @@ struct ImmersiveTrackingView: View {
                                         .scaleEffect(1.2)
                                         .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isRecording)
                                     
-                                    Text("RECORDING HEATMAP...")
+                                    Text("EYE TRACKING")
                                         .font(.largeTitle)
                                         .fontWeight(.bold)
-                                    
-                                    let minutes = Int(counterValue) / 60
-                                    let seconds = counterValue.truncatingRemainder(dividingBy: 60)
-                                    Text(String(format: "%02d.%05.2f", minutes, seconds))
-                                        .font(.largeTitle)
-                                        .fontWeight(.bold)
-                                        .monospacedDigit()
                                 }
                                 .padding(.horizontal, 25)
                                 .padding(.vertical, 15)
@@ -187,10 +180,11 @@ struct ImmersiveTrackingView: View {
                                     
                                     if showPressHoldHint {
                                         Text("Press and Hold")
-                                            .font(.system(size: 20))
+                                            .font(.system(size: 25))
                                             .padding(8)
                                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                                             .offset(y: 80)
+                                            .bold()
                                     }
                                 }
                                 .onDisappear {
@@ -221,9 +215,10 @@ struct ImmersiveTrackingView: View {
                                     .font(.largeTitle)
                                     .bold()
                                 
-                                Text("Track where you look in your surrounding environment")
+                                Text("Click continuously to track where you look \n in your surroundings")
                                     .font(.title)
                                     .padding(20)
+                                    .multilineTextAlignment(.center)
                                     
                                 Text("Make sure View Mirroring is enabled")
                                     .font(.title2)
@@ -242,7 +237,7 @@ struct ImmersiveTrackingView: View {
                                 }
                                 .padding(40)
                             }
-                            .frame(width: 800, height: 450)
+                            .frame(width: 800, height: 500)
                             .glassBackgroundEffect()
                         }
                         Spacer()

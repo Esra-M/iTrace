@@ -31,7 +31,7 @@ struct VideoUploadView: View {
                     .font(.largeTitle)
                     .bold()
                 
-                Text("Track where you look while watching videos")
+                Text("Click continuously to track where you look while watching a video")
                     .font(.title)
                     .padding(50)
                 

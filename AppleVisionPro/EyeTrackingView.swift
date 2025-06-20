@@ -153,7 +153,7 @@ struct EyeTrackingView: View {
                             .padding(20)
                     }
                     .frame(width: 60, height: 60)
-                    .foregroundColor(isBackButtonPressed ? .black : .primary) 
+                    .foregroundColor(isBackButtonPressed ? .primary : .primary) 
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { _ in
@@ -177,6 +177,7 @@ struct EyeTrackingView: View {
                             .padding(8)
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                             .offset(y: 60)
+                            .bold()
                     }
                 }
                 .onDisappear {

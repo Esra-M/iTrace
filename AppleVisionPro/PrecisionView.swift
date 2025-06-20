@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct BullseyeTestView: View {
+struct PrecisionView: View {
     @State private var lastTapLocation: CGPoint = .zero
     @State private var showCurrentDot = false
     @State private var showResult = false
@@ -24,7 +24,7 @@ struct BullseyeTestView: View {
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 10)
                 
-                Text("Average of 5 attempts")
+                Text("Average of 5")
                     .font(.title2)
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 30)

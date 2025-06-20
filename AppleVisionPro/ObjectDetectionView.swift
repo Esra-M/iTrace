@@ -2,7 +2,7 @@
 //  ObjectDetectionView.swift
 //  AppleVisionPro
 //
-//  Created by Assistant on 09.06.25.
+//  Created by Esra Mehmedova on 09.06.25.
 //
 
 import SwiftUI
@@ -112,11 +112,12 @@ struct ObjectDetectionView: View {
                                     
                                     VStack(spacing: 4) {
                                         Text(object.name)
-                                            .font(.title)
+                                            .font(.largeTitle)
                                             .fontWeight(.bold)
                                             .foregroundColor(.white)
                                             .multilineTextAlignment(.center)
                                         Text(String(format: "%.1f%%", object.confidence * 100))
+                                            .font(.title)
                                             .font(.callout)
                                             .fontWeight(.semibold)
                                             .foregroundColor(.white.opacity(0.9))
@@ -144,7 +145,7 @@ struct ObjectDetectionView: View {
                                     ProgressView().scaleEffect(2.0)
                                         .padding(.top, 30)
                                     
-                                    Text("Processing Object Detection Video")
+                                    Text("Generating Video")
                                         .font(.title)
                                         .fontWeight(.bold)
                                         .padding()
@@ -218,10 +219,11 @@ struct ObjectDetectionView: View {
                                     
                                     if showPressHoldHint {
                                         Text("Press and Hold")
-                                            .font(.system(size: 20))
+                                            .font(.system(size: 25))
                                             .padding(8)
                                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                                             .offset(y: 80)
+                                            .bold()
                                     }
                                 }
                                 .onDisappear {
@@ -252,7 +254,7 @@ struct ObjectDetectionView: View {
                                     .font(.largeTitle)
                                     .bold()
                                 
-                                Text("Real-time object identification")
+                                Text("Identify objects around you")
                                     .font(.title)
                                     .padding(20)
                                 
@@ -275,7 +277,7 @@ struct ObjectDetectionView: View {
                                                 .font(.system(size: 40))
                                         }
                                         
-                                        Text(isLoading ? "LOADING..." : "START RECORDING")
+                                        Text(isLoading ? "LOADING" : "START RECORDING")
                                             .font(.largeTitle)
                                             .fontWeight(.bold)
                                     }
@@ -347,7 +349,7 @@ struct ObjectDetectionView: View {
         Task {
             await sendStartDetectionRequest()
             
-            try? await Task.sleep(nanoseconds: 8_000_000_000) // 8 seconds static TOTO: make it dynamic
+            try? await Task.sleep(nanoseconds: 8_000_000_000) // 8 seconds static
             await MainActor.run {
                 isLoading = false
                 isVideoAnalysisReady = true

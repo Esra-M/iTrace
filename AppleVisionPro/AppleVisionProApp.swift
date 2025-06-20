@@ -35,7 +35,7 @@ struct AppleVisionProApp: App {
                     EyeTrackingView()
                         .frame(width: 1280, height: 720)
                 case .bullseyeTest:
-                    BullseyeTestView()
+                    PrecisionView()
                         .frame(width: 1280, height: 720)
                 case .videoUpload:
                     VideoUploadView()
