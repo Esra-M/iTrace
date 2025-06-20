@@ -16,6 +16,9 @@ from zeroconf import ServiceInfo, Zeroconf
 import uuid
 import queue
 import shutil
+import sys
+import argparse
+import glob
 
 # Configuration
 OUTPUT_DIR = os.path.expanduser("~/Desktop/Random")
@@ -330,6 +333,73 @@ class ObjectDetectionSystem:
 # Global detection system instance
 detection_system = ObjectDetectionSystem()
 
+def load_json_files(folder_path):
+    """Load all JSON files from the specified folder"""
+    json_files = glob.glob(os.path.join(folder_path, "*.json"))
+    all_click_data = []
+    
+    print(f"Found {len(json_files)} JSON files in {folder_path}")
+    
+    for json_file in json_files:
+        try:
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+                
+            print(f"Processing {os.path.basename(json_file)}")
+            
+            # Extract click data
+            if 'click_data' in data:
+                # Direct click data format
+                clicks = data['click_data']
+            elif 'detected_objects' in data:
+                # Object detection format
+                clicks = []
+                for obj in data['detected_objects']:
+                    if 'bounding_box' in obj:
+                        bbox = obj['bounding_box']
+                        # Use center of bounding box as click point
+                        center_x = bbox['x'] + bbox['width'] / 2
+                        center_y = bbox['y'] + bbox['height'] / 2
+                        clicks.append({
+                            'x': center_x,
+                            'y': center_y,
+                            'timestamp': obj.get('timestamp', 0)
+                        })
+            else:
+                print(f"Warning: No recognized click data format in {json_file}")
+                continue
+            
+            # Add clicks to the combined list
+            for click in clicks:
+                if 'x' in click and 'y' in click and 'timestamp' in click:
+                    all_click_data.append({
+                        'x': float(click['x']),
+                        'y': float(click['y']),
+                        'timestamp': float(click['timestamp']),
+                        'source_file': os.path.basename(json_file)
+                    })
+            
+            print(f"  Added {len(clicks)} clicks from {os.path.basename(json_file)}")
+            
+        except Exception as e:
+            print(f"Error processing {json_file}: {e}")
+    
+    print(f"Total clicks loaded: {len(all_click_data)}")
+    return all_click_data
+
+def find_video_file(folder_path):
+    """Find the first video file in the folder"""
+    video_extensions = ['*.mp4', '*.avi', '*.mov', '*.mkv', '*.flv', '*.wmv']
+    
+    for ext in video_extensions:
+        video_files = glob.glob(os.path.join(folder_path, ext))
+        if video_files:
+            print(f"Found video file: {video_files[0]}")
+            return video_files[0]
+    
+    print(f"No video files found in {folder_path}")
+    return None
+
 def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
     try:
         cap = cv2.VideoCapture(input_path)
@@ -388,6 +458,97 @@ def save_tracking_data(tracking_data, filename_base):
         return json_path
     except Exception as e:
         print(f"Error saving tracking data: {e}")
+        return None
+
+def generate_averaged_heatmap(video_path, all_click_data, output_folder=None):
+    """Generate averaged heatmap by reusing existing generate_heatmap function"""
+    if output_folder is None:
+        output_folder = OUTPUT_DIR
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create fake tracking_data that mimics the expected format
+    tracking_data = {
+        'click_data': all_click_data,
+        'user_name': 'averaged',
+        'tracking_type': 'heatmap',
+        'timestamp': timestamp
+    }
+    
+    # Use existing generate_heatmap function
+    temp_output = generate_heatmap(video_path, tracking_data)
+    
+    if temp_output and os.path.exists(temp_output):
+        # Move to final location with timestamped name
+        final_video_path = os.path.join(output_folder, f"averaged_heatmap_{timestamp}.mp4")
+        shutil.move(temp_output, final_video_path)
+        
+        # Load data from original JSON files
+        folder_path = os.path.dirname(video_path)
+        participants = []
+        
+        for json_file in glob.glob(os.path.join(folder_path, "*.json")):
+            try:
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                
+                if 'user_name' in data and 'precision_score' in data and 'click_data' in data:
+                    participants.append({
+                        "user_name": data['user_name'],
+                        "click_count": len(data['click_data']),
+                        "precision_score": data['precision_score']
+                    })
+            except Exception as e:
+                print(f"Error processing {json_file}: {e}")
+        
+        summary_data = {
+            "participant_count": len(participants),
+            "video_name": os.path.basename(video_path),
+            "participants": participants,
+            "generation_timestamp": timestamp,
+            "processing_type": "averaged_heatmap"
+        }
+        
+        summary_path = os.path.join(output_folder, f"averaged_heatmap_{timestamp}.json")
+        with open(summary_path, 'w') as f:
+            json.dump(summary_data, f, indent=2)
+        
+        print(f"Averaged heatmap generated: {final_video_path}")
+        print(f"Summary data saved: {summary_path}")
+        return final_video_path
+    
+    return None
+
+def process_folder(folder_path):
+    """Process a folder containing JSON files and video to generate averaged heatmap"""
+    print(f"Processing folder: {folder_path}")
+    
+    if not os.path.exists(folder_path):
+        print(f"Error: Folder {folder_path} does not exist")
+        return None
+    
+    # Load all JSON files
+    all_click_data = load_json_files(folder_path)
+    
+    if not all_click_data:
+        print("No valid click data found in JSON files")
+        return None
+    
+    # Find video file
+    video_path = find_video_file(folder_path)
+    
+    if not video_path:
+        print("No video file found in folder")
+        return None
+    
+    # Generate averaged heatmap
+    output_path = generate_averaged_heatmap(video_path, all_click_data, OUTPUT_DIR)
+    
+    if output_path:
+        print(f"Successfully generated averaged heatmap: {output_path}")
+        return output_path
+    else:
+        print("Failed to generate averaged heatmap")
         return None
 
 def generate_heatmap(video_path, tracking_data):
@@ -669,13 +830,35 @@ def generate_heatmap_endpoint():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-if __name__ == "__main__":
-    zeroconf, service_info = register_service()
+def main():
+    parser = argparse.ArgumentParser(description='Vision Pro Heatmap Server')
+    parser.add_argument('--folder', '-f', type=str, help='Folder path containing JSON files and video to process')
+    parser.add_argument('--server', '-s', action='store_true', help='Start the Flask server (default behavior)')
     
-    try:
-        print(f"Server starting on {get_local_ip()}:5555")
-        app.run(host='0.0.0.0', port=5555, debug=True)
-    finally:
-        if zeroconf and service_info:
-            zeroconf.unregister_service(service_info)
-            zeroconf.close()
+    args = parser.parse_args()
+    
+    if args.folder:
+        # Process folder mode
+        print("Running in folder processing mode...")
+        result = process_folder(args.folder)
+        if result:
+            print(f"Processing completed successfully: {result}")
+            sys.exit(0)
+        else:
+            print("Processing failed")
+            sys.exit(1)
+    else:
+        # Server mode
+        print("Running in server mode...")
+        zeroconf, service_info = register_service()
+        
+        try:
+            print(f"Server starting on {get_local_ip()}:5555")
+            app.run(host='0.0.0.0', port=5555, debug=True)
+        finally:
+            if zeroconf and service_info:
+                zeroconf.unregister_service(service_info)
+                zeroconf.close()
+
+if __name__ == "__main__":
+    main()
