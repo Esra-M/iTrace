@@ -19,6 +19,7 @@ import shutil
 import sys
 import argparse
 import glob
+import re
 
 # Configuration
 OUTPUT_DIR = os.path.expanduser("~/Desktop/Random")
@@ -39,10 +40,8 @@ class ObjectDetectionSystem:
         self.detection_lock = threading.Lock()
         self.session_data = []
         self.session_lock = threading.Lock()
-        self.start_time = None
         self.ready_time = None
         self.system_initialized = False
-        
         self._initialize_yolo()
     
     def _initialize_yolo(self):
@@ -62,14 +61,10 @@ class ObjectDetectionSystem:
     
     def start_detection(self):
         """Start object detection system"""
-        if self.detection_active:
-            return True
-        
-        if self.detection_model is None:
-            return False
+        if self.detection_active or self.detection_model is None:
+            return self.detection_model is not None
         
         self.detection_active = True
-        self.start_time = time.time()
         self.system_initialized = False
         
         # Clear previous data
@@ -77,10 +72,8 @@ class ObjectDetectionSystem:
             self.session_data.clear()
         self._clear_frame_queue()
         
-        # Start recording and analysis
-        recording_thread = threading.Thread(target=self._record_and_analyze, daemon=True)
-        recording_thread.start()
-        
+        # Start recording and analysis threads
+        threading.Thread(target=self._record_and_analyze, daemon=True).start()
         self.analysis_thread = threading.Thread(target=self._analyze_frames, daemon=True)
         self.analysis_thread.start()
         
@@ -91,10 +84,8 @@ class ObjectDetectionSystem:
         self.detection_active = False
         self.system_initialized = False
         
-        # Stop recording
         video_path = self._stop_recording()
         
-        # Clear state
         with self.detection_lock:
             self.latest_detections = []
         self._clear_frame_queue()
@@ -112,50 +103,35 @@ class ObjectDetectionSystem:
             return self.session_data.copy()
     
     def _record_and_analyze(self):
-        """Record video and provide frames for analysis"""
+        """Record video with audio using SoX for audio and FFmpeg for video"""
         try:
             # Wait for initialization
             time.sleep(8)  # Static 8 seconds
             
             self.ready_time = time.time()
             self.system_initialized = True
-            print("Detection system ready - starting video recording")
             
-            # Create recording file
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.recording_filepath = os.path.join(tempfile.gettempdir(), f"object_detection_{timestamp}.mp4")
+            audio_filepath = os.path.join(tempfile.gettempdir(), f"audio_{timestamp}.wav")
+            video_filepath = os.path.join(tempfile.gettempdir(), f"video_{timestamp}.mp4")
             
-            # FFmpeg command for recording and frame extraction
+            # Start SoX audio recording in background
+            audio_cmd = ['sox', '-d', audio_filepath]
+            audio_process = subprocess.Popen(audio_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # FFmpeg video recording
             cmd = [
-                'ffmpeg',
-                '-f', 'avfoundation',
-                '-i', '1',
+                'ffmpeg', '-f', 'avfoundation', '-i', '1',
                 '-vf', 'crop=iw:ih*0.865:0:ih*0.085',
-                
-                # Save to file
-                '-map', '0:v',
-                '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1920:1080',
-                '-r', '30',
-                '-vcodec', 'libx264',
-                '-preset', 'medium',
-                '-crf', '18',
-                '-pix_fmt', 'yuv420p',
-                '-y', self.recording_filepath,
-                
-                # Extract frames for analysis
-                '-map', '0:v',
-                '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1280:720',
-                '-r', '5',
-                '-f', 'rawvideo',
-                '-pix_fmt', 'bgr24',
-                '-'
+                '-r', '30', '-vcodec', 'libx264', 
+                '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-y', video_filepath,
+                '-map', '0:v', '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1280:720',
+                '-r', '5', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'
             ]
             
-            self.recording_process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**8
-            )
+            self.recording_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**8)
             
-            # Read frames for analysis
             frame_size = 1280 * 720 * 3
             while self.detection_active and self.recording_process:
                 try:
@@ -171,24 +147,41 @@ class ObjectDetectionSystem:
                 except Exception as e:
                     print(f"Error reading frame: {e}")
                     break
-                    
+            
+            # Stop audio recording
+            audio_process.terminate()
+            audio_process.wait()
+            
+            # Merge video and audio
+            merge_cmd = [
+                'ffmpeg', '-i', video_filepath, '-i', audio_filepath,
+                '-c:v', 'copy', '-c:a', 'aac', '-shortest', '-y', self.recording_filepath
+            ]
+            subprocess.run(merge_cmd, capture_output=True)
+            
+            # Clean up temp files
+            try:
+                os.unlink(video_filepath)
+                os.unlink(audio_filepath)
+            except:
+                pass
+                
         except Exception as e:
             print(f"Error in recording: {e}")
-    
+
     def _analyze_frames(self):
         """Analyze frames for object detection"""
         while self.detection_active:
             try:
-                if not self.frame_queue.empty():
-                    # Get latest frame
-                    frame = None
-                    while not self.frame_queue.empty():
-                        frame = self.frame_queue.get()
-                    
-                    if frame is not None and self.system_initialized:
-                        detections = self._detect_objects(frame)
-                        with self.detection_lock:
-                            self.latest_detections = detections
+                frame = None
+                # Get latest frame
+                while not self.frame_queue.empty():
+                    frame = self.frame_queue.get()
+                
+                if frame is not None and self.system_initialized:
+                    detections = self._detect_objects(frame)
+                    with self.detection_lock:
+                        self.latest_detections = detections
                 else:
                     time.sleep(0.1)
                     
@@ -198,19 +191,17 @@ class ObjectDetectionSystem:
     
     def _detect_objects(self, frame):
         """Detect objects in frame using YOLO"""
-        if self.detection_model is None or not self.system_initialized:
+        if not (self.detection_model and self.system_initialized):
             return []
         
         try:
             results = self.detection_model(frame, conf=0.5, iou=0.45, verbose=False)
             detections = []
-            current_time = time.time()
-            video_timestamp = current_time - self.ready_time if self.ready_time else 0
+            video_timestamp = time.time() - self.ready_time if self.ready_time else 0
             
             for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for box in boxes:
+                if result.boxes is not None:
+                    for box in result.boxes:
                         class_id = int(box.cls[0])
                         class_name = self.detection_model.names[class_id]
                         confidence = float(box.conf[0])
@@ -222,16 +213,11 @@ class ObjectDetectionSystem:
                         bbox_w = max(0.0, min(1.0 - screen_x, bbox_w))
                         bbox_h = max(0.0, min(1.0 - screen_y, bbox_h))
                         
-                        if bbox_w >= 0.01 and bbox_h >= 0.01:  # Minimum size filter
+                        if bbox_w >= 0.01 and bbox_h >= 0.01: 
                             detection_data = {
                                 "name": class_name,
                                 "confidence": confidence,
-                                "bbox": {
-                                    "x": screen_x,
-                                    "y": screen_y,
-                                    "width": bbox_w,
-                                    "height": bbox_h
-                                }
+                                "bbox": {"x": screen_x, "y": screen_y, "width": bbox_w, "height": bbox_h}
                             }
                             detections.append(detection_data)
                             
@@ -241,12 +227,7 @@ class ObjectDetectionSystem:
                                     "object_name": class_name,
                                     "confidence": confidence,
                                     "timestamp": round(video_timestamp, 2),
-                                    "bounding_box": {
-                                        "x": screen_x,
-                                        "y": screen_y,
-                                        "width": bbox_w,
-                                        "height": bbox_h
-                                    }
+                                    "bounding_box": {"x": screen_x, "y": screen_y, "width": bbox_w, "height": bbox_h}
                                 })
             
             return sorted(detections, key=lambda x: x['confidence'], reverse=True)[:15]
@@ -302,7 +283,6 @@ class ObjectDetectionSystem:
             with open(json_path, 'w') as f:
                 json.dump(session_data, f, indent=2)
             
-            print(f"Session data saved: {json_path}")
             return json_path
             
         except Exception as e:
@@ -323,7 +303,6 @@ class ObjectDetectionSystem:
             final_path = os.path.join(OUTPUT_DIR, video_filename)
             
             shutil.move(self.recording_filepath, final_path)
-            print(f"Video saved: {final_path}")
             return final_path
             
         except Exception as e:
@@ -379,7 +358,7 @@ def load_json_files(folder_path):
                         'source_file': os.path.basename(json_file)
                     })
             
-            print(f"  Added {len(clicks)} clicks from {os.path.basename(json_file)}")
+            print(f"Added {len(clicks)} clicks from {os.path.basename(json_file)}")
             
         except Exception as e:
             print(f"Error processing {json_file}: {e}")
@@ -413,8 +392,22 @@ def reduce_video_quality(input_path, max_width=1280, max_height=720, crf=28):
             return input_path, 1.0, 1.0
         
         reduced_path = input_path.replace('.mp4', '_reduced.mp4')
-        cmd = ['ffmpeg', '-i', input_path, '-vf', f'scale={new_w}:{new_h}',
-               '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', str(crf), '-an', '-y', reduced_path]
+        
+        # Check if input has audio and preserve it
+        probe_cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', input_path]
+        has_audio = False
+        try:
+            result = subprocess.run(probe_cmd, capture_output=True, text=True)
+            has_audio = 'audio' in result.stdout
+        except:
+            pass
+        
+        if has_audio:
+            cmd = ['ffmpeg', '-i', input_path, '-vf', f'scale={new_w}:{new_h}',
+                   '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'ultrafast', '-crf', str(crf), '-y', reduced_path]
+        else:
+            cmd = ['ffmpeg', '-i', input_path, '-vf', f'scale={new_w}:{new_h}',
+                   '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', str(crf), '-an', '-y', reduced_path]
         
         if subprocess.run(cmd, capture_output=True).returncode == 0:
             return reduced_path, new_w / w, new_h / h
@@ -514,15 +507,12 @@ def generate_averaged_heatmap(video_path, all_click_data, output_folder=None):
             json.dump(summary_data, f, indent=2)
         
         print(f"Averaged heatmap generated: {final_video_path}")
-        print(f"Summary data saved: {summary_path}")
         return final_video_path
     
     return None
 
 def process_folder(folder_path):
-    """Process a folder containing JSON files and video to generate averaged heatmap"""
-    print(f"Processing folder: {folder_path}")
-    
+    """Process a folder containing JSON files and video to generate averaged heatmap"""    
     if not os.path.exists(folder_path):
         print(f"Error: Folder {folder_path} does not exist")
         return None
@@ -569,7 +559,9 @@ def generate_heatmap(video_path, tracking_data):
         w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+        # Create temporary video without audio for processing
+        temp_video_path = output_path.replace('.mp4', '_temp.mp4')
+        out = cv2.VideoWriter(temp_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
         fade_duration = int(fps * 0.3)
         
         click_data = tracking_data.get('click_data', [])
@@ -635,6 +627,32 @@ def generate_heatmap(video_path, tracking_data):
         cap.release()
         out.release()
         
+        # Check if original video has audio and merge it
+        probe_cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', reduced_path]
+        has_audio = False
+        try:
+            result = subprocess.run(probe_cmd, capture_output=True, text=True)
+            has_audio = 'audio' in result.stdout
+        except:
+            pass
+        
+        if has_audio:
+            # Merge video with audio from original
+            merge_cmd = [
+                'ffmpeg', '-i', temp_video_path, '-i', reduced_path,
+                '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0',
+                '-shortest', '-y', output_path
+            ]
+            result = subprocess.run(merge_cmd, capture_output=True)
+            if result.returncode == 0:
+                os.unlink(temp_video_path)
+            else:
+                print("Failed to merge audio, keeping video-only heatmap")
+                shutil.move(temp_video_path, output_path)
+        else:
+            print("No audio found in original video")
+            shutil.move(temp_video_path, output_path)
+        
         if reduced_path != video_path:
             try: 
                 os.unlink(reduced_path)
@@ -648,18 +666,37 @@ def generate_heatmap(video_path, tracking_data):
         print(f"Error generating heatmap: {e}")
         return None
 
+def find_free_port():
+    """Find a random free port"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
 
 def get_local_ip():
+    """Get local IP address, trying multiple interfaces"""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        # Try connecting to a remote address to get local IP
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            return ip
     except:
-        return "127.0.0.1"
+        try:
+            # Fallback: get hostname IP
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+            if ip.startswith("127."):
+                # If localhost, try to get actual IP
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.connect(("1.1.1.1", 80))
+                    ip = s.getsockname()[0]
+            return ip
+        except:
+            return "127.0.0.1"
 
-def register_service():
+def register_service(port):
     try:
         zeroconf = Zeroconf()
         local_ip = get_local_ip()
@@ -667,13 +704,12 @@ def register_service():
         unique_id = str(uuid.uuid4())[:8]
         service_name = f"Vision Pro Server {unique_id}"
         service_type = "_visionpro._tcp.local."
-        service_port = 5555
         
         info = ServiceInfo(
             service_type,
             f"{service_name}.{service_type}",
             addresses=[socket.inet_aton(local_ip)],
-            port=service_port,
+            port=port,
             properties={
                 'description': 'Apple Vision Pro Heatmap Generation Server',
                 'hostname': hostname,
@@ -682,13 +718,12 @@ def register_service():
         )
         
         zeroconf.register_service(info)
-        print(f"Service registered: {service_name} at {local_ip}:{service_port}")
+        print(f"Service registered: {service_name} at {local_ip}:{port}")
         return zeroconf, info
         
     except Exception as e:
         print(f"Failed to register service: {e}")
         return None, None
-
 
 @app.route('/start_detection', methods=['POST'])
 def start_detection():
@@ -765,21 +800,50 @@ def start_recording():
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         current_recording_filepath = os.path.join(tempfile.gettempdir(), f"temp_recording_{timestamp}.mp4")
+        audio_filepath = os.path.join(tempfile.gettempdir(), f"temp_audio_{timestamp}.wav")
+        video_filepath = os.path.join(tempfile.gettempdir(), f"temp_video_{timestamp}.mp4")
         
         def record():
             global current_recording_process
+            
+            # Start SoX audio recording
+            audio_cmd = ['sox', '-d', audio_filepath]
+            audio_process = subprocess.Popen(audio_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # FFmpeg video recording
             cmd = ['ffmpeg', '-f', 'avfoundation', '-i', '1', '-r', '20', 
                   '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1280:720',
                   '-vcodec', 'libx264', '-preset', 'veryfast', '-crf', '25', 
-                  '-pix_fmt', 'yuv420p', '-y', current_recording_filepath]
+                  '-pix_fmt', 'yuv420p', '-y', video_filepath]
             current_recording_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Wait for video recording to finish
+            current_recording_process.wait()
+            
+            # Stop audio recording
+            audio_process.terminate()
+            audio_process.wait()
+            
+            # Merge audio and video
+            merge_cmd = [
+                'ffmpeg', '-i', video_filepath, '-i', audio_filepath,
+                '-c:v', 'copy', '-c:a', 'aac', '-shortest', '-y', current_recording_filepath
+            ]
+            subprocess.run(merge_cmd, capture_output=True)
+            
+            # Clean up temp files
+            try:
+                os.unlink(video_filepath)
+                os.unlink(audio_filepath)
+            except:
+                pass
         
         threading.Thread(target=record).start()
-        return jsonify({"status": "success", "message": "Recording started"})
+        return jsonify({"status": "success", "message": "Recording with SoX audio started"})
         
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
+    
 @app.route('/stop_recording', methods=['POST'])
 def stop_recording():
     global current_recording_process, current_recording_filepath
@@ -834,27 +898,28 @@ def main():
     parser = argparse.ArgumentParser(description='Vision Pro Heatmap Server')
     parser.add_argument('--folder', '-f', type=str, help='Folder path containing JSON files and video to process')
     parser.add_argument('--server', '-s', action='store_true', help='Start the Flask server (default behavior)')
+    parser.add_argument('--port', '-p', type=int, help='Port to run server on (default: random free port)')
     
     args = parser.parse_args()
     
     if args.folder:
         # Process folder mode
-        print("Running in folder processing mode...")
         result = process_folder(args.folder)
         if result:
-            print(f"Processing completed successfully: {result}")
             sys.exit(0)
         else:
             print("Processing failed")
             sys.exit(1)
     else:
         # Server mode
-        print("Running in server mode...")
-        zeroconf, service_info = register_service()
+        port = args.port if args.port else find_free_port()
+        local_ip = get_local_ip()
+        
+        zeroconf, service_info = register_service(port)
         
         try:
-            print(f"Server starting on {get_local_ip()}:5555")
-            app.run(host='0.0.0.0', port=5555, debug=True)
+            print(f"Server starting on {local_ip}:{port}")
+            app.run(host='0.0.0.0', port=port, debug=True)
         finally:
             if zeroconf and service_info:
                 zeroconf.unregister_service(service_info)
