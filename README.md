@@ -27,7 +27,9 @@ Clicking is required to access gaze data on the Vision Pro. The test measures ho
   - Increase movement tolerance to the maximum for a broader range of gaze movement
   This enables fully gaze-driven interaction, making it possible to click just by looking, with no need for hand gestures or external devices.
 
-- ***Bluetooth Gaming Controller***: Use a compatible controller (e.g., 8BitDo Pro 2) to trigger rapid clicking via a button press. This is especially useful for repeated or high-speed clicking. To set up the 8BitDo Pro 2 for turbo clicking on the Vision Pro:
+- ***Bluetooth Gaming Controller***: Use a compatible controller (e.g., 8BitDo Pro 2) to trigger rapid clicking via a button press. This is especially useful for repeated or high-speed clicking.
+
+To set up the 8BitDo Pro 2 for turbo clicking on the Vision Pro:
   1. **Connect the controller to your computer via USB.**
   2. **Install the 8BitDo Ultimate software and configure:**
       - Remap the star button to "Turbo".
@@ -46,18 +48,21 @@ Other click methods may also be used, however, using a controller is recommended
 Tracks gaze while watching a video, with gaze points recorded each time the user clicks. After the video is over, the gaze data and the video are sent to the server, which generates a heatmap overlay on top of the video. Results include:
 - ***Video***: The original video with a heatmap overlay showing gaze points.
 - ***JSON***: A file containing detailed gaze data, including the video name, timestamp and coordinates for each gaze point, and user info.
+
 Both the *video* and *JSON* are saved by default on your Mac, and are also sent to the Vision Pro where they are displayed and can be exported directly from the device.
 
 ### Spatial Eye Tracking
-Tracks where the user is looking in their surrounding environment. To use this feature, the user must share their Vision Pro screen with the Mac using the screen sharing button on Vision Pro. The server records a video of the shared screen, and the Vision Pro records the eye tracking data. When the recording is stopped, the Vision Pro sends the gaze data to the server, which then generates a heatmap overlay on the recorded video. Results include:
-- ***Video***: The recorded real-world view with a heatmap overlay showing gaze points.
+Tracks where the user is looking in their surrounding environment. To use this feature, the user must mirror their Vision Pro screen to the Mac using the View Mirroring button on the Vision Pro control center. The server records a video of the mirrored screen, and the Vision Pro records the eye tracking data. When the recording is stopped, the Vision Pro sends the gaze data to the server, which then generates a heatmap overlay on the recorded video. Results include:
+- ***Video***: The recorded space with a heatmap overlay showing gaze points.
 - ***JSON***: A file containing detailed gaze data, including timestamp and coordinates for each gaze point, and user info.
+
 Both the video and JSON are saved by default on your Mac, and are also sent to the Vision Pro where they are displayed and can be exported directly from the device.
 
 ### Object Detection
-Detects and visualizes objects in real time from your Vision Pro using YOLOv8l. To use this feature, the user must share their Vision Pro screen with the Mac using the screen sharing button on the Vision Pro. The server records a video of the shared screen and runs object detection on each frame. When recording is stopped, results include:
-- ***Video***: The recorded view with bounding boxes, object names, and confidence scores over each detected object, displayed in real time.
+Detects and visualizes objects in real time from your Vision Pro using YOLOv8l. To use this feature, the user must mirror their Vision Pro screen to the Mac using the View Mirroring button on the Vision Pro control center. The server records a video of the mirrored screen and runs object detection on each frame. When recording is stopped, results include:
+- ***Video***: The recorded space with bounding boxes, object names, and confidence scores over each detected object, displayed in real time.
 - ***JSON***: A file containing  user info, all unique objects detected in the video, each object's name, confidence score, bounding box location, and the timestamp of appearance in the video.
+
 Both the video and JSON are saved by default on your Mac, and are also sent to the Vision Pro where they are displayed and can be exported directly from the device.
 
 ### Average Heatmap (Command Line)
@@ -85,7 +90,7 @@ cd AppleVisionPro
 
 ### 2. Setting Up the Vision Pro Device (only once)
 - Install Xcode and open the project folder.
-- Ensure Mac and Vision Pro are on the same Wi-Fi network.
+- Ensure the Mac and Vision Pro are on the same Wi-Fi network.
 - On the Vision Pro go to Settings > General > Remote Devices.
 - In Xcode open Window > Devices and Simulators, select your device in the Discovered section in the Devices tab.
 - Click Pair and enter the code shown on Vision Pro.
@@ -112,5 +117,5 @@ cd AppleVisionPro
   ```
 - Generate an average heatmap from a folder:
   ```
-  make folder FOLDER=/path/to/folder
+  make FOLDER=/path/to/folder
   ```
