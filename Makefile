@@ -7,7 +7,6 @@ setup:
 run:
 	. venv/bin/activate && python3 heatmap.py
  
-# Allow 'make FOLDER=/path/to/folder' to work without specifying a target
 .DEFAULT_GOAL := folder
 
 folder:
