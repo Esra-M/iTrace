@@ -22,7 +22,7 @@ import glob
 import re
 
 # Configuration
-OUTPUT_DIR = os.path.expanduser("~/Desktop/Random")
+OUTPUT_DIR = os.path.expanduser("~/Desktop/Heatmap")
 
 # Global state
 app = Flask(__name__)

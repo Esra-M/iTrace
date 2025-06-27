@@ -1,5 +1,3 @@
-# Makefile for Vision Pro Heatmap Server
-
 .PHONY: setup run folder
 
 setup:
