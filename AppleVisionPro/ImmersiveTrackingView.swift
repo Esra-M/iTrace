@@ -15,12 +15,17 @@ struct ClickData: Codable {
     let timestamp: Double
 }
 
+struct TapLocation {
+    let point: CGPoint
+    let timestamp: Double
+}
+
 struct ImmersiveTrackingView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openWindow) private var openWindow
     
-    @State private var tapLocation: CGPoint? = nil
+    @State private var tapLocations: [TapLocation] = []
     @State private var isRecording = false
     @State private var counterValue: Double = 0.00
     @State private var timer: Timer?
@@ -66,34 +71,37 @@ struct ImmersiveTrackingView: View {
                             .frame(width: frameSize.width, height: frameSize.height)
                             .overlay(Rectangle().stroke(Color.blue, lineWidth: 0))
                             .contentShape(Rectangle())
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                                    .onEnded { value in
-                                        tapLocation = value.location
-                                        if let startTime = recordingStartTime {
-                                            let timestamp = Date().timeIntervalSince(startTime)
-                                            
-                                            let xPercentage = Double(value.location.x / frameSize.width)
-                                            let yPercentage = Double(value.location.y / frameSize.height)
-                                            
-                                            let clampedX = max(0.0, min(1.0, xPercentage))
-                                            let clampedY = max(0.0, min(1.0, yPercentage))
-                                            
-                                            clickDataArray.append(ClickData(
-                                                x: clampedX,
-                                                y: clampedY,
-                                                timestamp: timestamp
-                                            ))
-                                            print("Clicked at (\(clampedX * 100), \(clampedY * 100)) at time \(timestamp)")
-                                        }
-                                    }
-                            )
-                        
-//                        if let location = tapLocation {
+                            .onTapGesture(coordinateSpace: .local) { location in
+                                if let startTime = recordingStartTime {
+                                    let timestamp = Date().timeIntervalSince(startTime)
+                                    
+                                    let xPercentage = Double(location.x / frameSize.width)
+                                    let yPercentage = Double(location.y / frameSize.height)
+                                    
+                                    let clampedX = max(0.0, min(1.0, xPercentage))
+                                    let clampedY = max(0.0, min(1.0, yPercentage))
+                                    
+                                    // Add to tap locations array to keep all dots visible
+                                    tapLocations.append(TapLocation(point: location, timestamp: timestamp))
+                                    
+                                    clickDataArray.append(ClickData(
+                                        x: clampedX,
+                                        y: clampedY,
+                                        timestamp: timestamp
+                                    ))
+                                    print("Tapped at (\(clampedX * 100), \(clampedY * 100)) at time \(timestamp)")
+                                }
+                            }
+
+//                        // Draw all tap locations as persistent red dots
+//                        ForEach(tapLocations.indices, id: \.self) { index in
+//                            let location = tapLocations[index]
+//                            let circleSize = min(frameSize.width, frameSize.height) * 0.04
+//                            
 //                            Circle()
 //                                .fill(Color.red)
-//                                .frame(width: 40, height: 40)
-//                                .position(location)
+//                                .frame(width: circleSize, height: circleSize)
+//                                .position(location.point)
 //                        }
                     }
                     
@@ -291,7 +299,7 @@ struct ImmersiveTrackingView: View {
         isRecording = true
         recordingStartTime = Date()
         counterValue = 0.00
-        tapLocation = nil
+        tapLocations.removeAll()  // Clear all previous tap locations
         clickDataArray.removeAll()
         appState.clickData.removeAll()
         

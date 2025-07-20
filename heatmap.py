@@ -608,7 +608,19 @@ def generate_heatmap(video_path, tracking_data):
                 
                 out.write(result)
         
-        # Add final heatmap frame
+        # Get the last frame for final heatmap overlay
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count - 1)
+        ret, last_frame = cap.read()
+        if not ret:
+            # If we can't get the last frame, reset to beginning and read through
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            for _ in range(frame_count):
+                ret, last_frame = cap.read()
+                if not ret:
+                    last_frame = np.zeros((h, w, 3), dtype=np.uint8)
+                    break
+        
+        # Add final heatmap frame with extended duration
         final_grid = np.zeros((h, w), dtype=np.float32)
         for click in click_data:
             x, y = int(float(click["x"]) * w), int(float(click["y"]) * h)
@@ -620,9 +632,13 @@ def generate_heatmap(video_path, tracking_data):
                 final_grid = np.sqrt(final_grid / np.max(final_grid))
             final_heatmap = create_heatmap_overlay(final_grid, w, h)
             if final_heatmap is not None:
-                black = np.zeros((h, w, 3), dtype=np.uint8)
-                final_frame = cv2.addWeighted(black, 1.0, final_heatmap, 1.0, 0)
-                out.write(final_frame)
+                # Darken the last frame and overlay the heatmap
+                darkened_last = cv2.addWeighted(last_frame, 0.5, np.zeros_like(last_frame), 0.5, 0)
+                final_frame = cv2.addWeighted(darkened_last, 1.0, final_heatmap, 0.8, 0)
+                
+                final_frame_duration = int(fps * 3)
+                for _ in range(final_frame_duration):
+                    out.write(final_frame)
         
         cap.release()
         out.release()
@@ -637,17 +653,29 @@ def generate_heatmap(video_path, tracking_data):
             pass
         
         if has_audio:
-            # Merge video with audio from original
-            merge_cmd = [
-                'ffmpeg', '-i', temp_video_path, '-i', reduced_path,
-                '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0',
-                '-shortest', '-y', output_path
-            ]
-            result = subprocess.run(merge_cmd, capture_output=True)
-            if result.returncode == 0:
-                os.unlink(temp_video_path)
-            else:
-                print("Failed to merge audio, keeping video-only heatmap")
+            # Get duration of temp video to ensure audio sync
+            duration_cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', temp_video_path]
+            try:
+                duration_result = subprocess.run(duration_cmd, capture_output=True, text=True)
+                temp_duration = float(duration_result.stdout.strip())
+                
+                # Merge video with audio
+                merge_cmd = [
+                    'ffmpeg', '-i', temp_video_path, '-i', reduced_path,
+                    '-c:v', 'libx264', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0',
+                    '-t', str(temp_duration), 
+                    '-y', output_path
+                ]
+                result = subprocess.run(merge_cmd, capture_output=True)
+                if result.returncode == 0:
+                    os.unlink(temp_video_path)
+                    print("Audio merged successfully")
+                else:
+                    print(f"Failed to merge audio: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                    shutil.move(temp_video_path, output_path)
+                    
+            except Exception as e:
+                print(f"Error during audio merge: {e}")
                 shutil.move(temp_video_path, output_path)
         else:
             print("No audio found in original video")
@@ -665,7 +693,7 @@ def generate_heatmap(video_path, tracking_data):
     except Exception as e:
         print(f"Error generating heatmap: {e}")
         return None
-
+      
 def find_free_port():
     """Find a random free port"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

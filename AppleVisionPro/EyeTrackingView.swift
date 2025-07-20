@@ -58,40 +58,30 @@ struct EyeTrackingView: View {
                     .disabled(true)
                 }
 
-                if let _ = activeVideo {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
-                                .onEnded { value in
-                                    guard !isPreparingHeatmap && !isHeatmapDisplayMode else { return }
-                                    let location = value.location
-                                    
-                                    let videoPercentages = convertScreenToVideoPercentages(
-                                        screenPoint: location,
-                                        viewSize: geometry.size,
-                                        videoRect: videoRect
-                                    )
-                                    
-                                    guard let percentages = videoPercentages else {
-                                        return
-                                    }
-                                    
-                                    videoTimestamp = originalVideo?.currentTime().seconds ?? 0
-                                    lastPressTime = Date()
-                                    
-                                    let pixelX = percentages.x * videoSize.width
-                                    let pixelY = percentages.y * videoSize.height
-                                    pressedCoordinates = (x: pixelX, y: pixelY)
-                                    
-                                    tapHistory.append((x: percentages.x, y: percentages.y, timestamp: videoTimestamp))
-                                    print("Clicked at (\(percentages.x * 100), \(percentages.y * 100)) at time \(videoTimestamp)")
 
-                                }
-                        )
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(coordinateSpace: .local) { location in
+                            guard !isPreparingHeatmap && !isHeatmapDisplayMode else { return }
+                            let videoPercentages = convertScreenToVideoPercentages(
+                                screenPoint: location,
+                                viewSize: geometry.size,
+                                videoRect: videoRect
+                            )
+                            guard let percentages = videoPercentages else { return }
+
+                            videoTimestamp = originalVideo?.currentTime().seconds ?? 0
+                            lastPressTime = Date()
+
+                            let pixelX = percentages.x * videoSize.width
+                            let pixelY = percentages.y * videoSize.height
+                            pressedCoordinates = (x: pixelX, y: pixelY)
+
+                            tapHistory.append((x: percentages.x, y: percentages.y, timestamp: videoTimestamp))
+                            print("Tapped at (\(percentages.x * 100), \(percentages.y * 100)) at time \(videoTimestamp)")
+                        }
                         .allowsHitTesting(!isPreparingHeatmap)
-                }
-
+                    
                 if isPreparingHeatmap {
                     Color.black.opacity(0.6).ignoresSafeArea()
                     

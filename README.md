@@ -1,4 +1,4 @@
-# Vision Pro Gaze & Object Tracking
+# iTrace: Click-Based Gaze Visualization & Object Detection on the Apple Vision Pro
 
 An Apple Vision Pro project where you can track your gaze across videos and real-world environments, and detect objects in your surroundings. This project combines a visionOS app and a Python server to provide:
 
@@ -16,10 +16,15 @@ An Apple Vision Pro project where you can track your gaze across videos and real
 
 A bullseye test where users focus their gaze on the center target and click to capture their accuracy. The average of 5 attempts determines the user's precision score, reflecting how accurately their gaze is calibrated on the Vision Pro.
 
+![Precision Demo](Demos/precision.gif)
+
+
 ### Clicking Speed Test
 Clicking is required to access gaze data on the Vision Pro. The test measures how quickly users can click, which is essential for all eye tracking functionalities. Example clicking methods include:
 
 - ***Hands***: The default Vision Pro gesture of pinching your index finger and thumb together to perform a click
+
+![Clicking Speed Test Pinch Demo](Demos/clicking_pinch.gif)
 
 - ***Dwell Control***: An accessibility feature that enables fully gaze-driven interaction, making it possible to click just by looking, with no need for hand gestures or external devices.
 
@@ -27,7 +32,12 @@ Clicking is required to access gaze data on the Vision Pro. The test measures ho
   - Adjust dwell time to 0.05s for the fastest clicking speed
   - Increase movement tolerance to the maximum for a broader range of gaze movement
 
+![Clicking Speed Test Dwell Control Demo](Demos/clicking_dwell.gif)
+
 - ***Bluetooth Gaming Controller***: Use a compatible controller (e.g., 8BitDo Pro 2) to trigger rapid clicking via a button press. This is especially useful for repeated high-speed clicking.
+
+![Clicking Speed Test Controller Demo](Demos/clicking_controller.gif)
+
 
 To set up the 8BitDo Pro 2 for turbo clicking on the Vision Pro:
   1. **Connect the controller to your computer via USB.**
@@ -51,12 +61,17 @@ Tracks gaze while watching a video, with gaze points recorded each time the user
 
 Both the *video* and *JSON* are saved by default on your Mac (Desktop/Heatmap by default), and are also sent to the Vision Pro where they are displayed and can be exported directly to the device.
 
+![Video Eye Tracking Demo](Demos/video_eye_tracking.gif)
+
+
 ### Spatial Eye Tracking
 Tracks where the user is looking in their surrounding environment. To use this feature, the user must mirror their Vision Pro screen to the Mac using the View Mirroring button on the Vision Pro control center. The server records a video of the mirrored screen, and the Vision Pro records the eye tracking data. When the recording is stopped, the Vision Pro sends the gaze data to the server, which then generates a heatmap overlay on the recorded video. Results include:
 - ***Video***: The recorded space with a heatmap overlay showing gaze points.
 - ***JSON***: A file containing detailed gaze data, including timestamp and coordinates for each gaze point, and user info.
 
 Both the video and JSON are saved by default on your Mac (Desktop/Heatmap by default), and are also sent to the Vision Pro where they are displayed and can be exported directly to the device.
+
+![Spatial Eye Tracking Demo](Demos/spatial_eye_tracking.gif)
 
 ### Object Detection
 Detects and visualizes objects in real time using YOLOv8l. To use this feature, the user must mirror their Vision Pro screen to the Mac using the View Mirroring button on the Vision Pro control center. The server records a video of the mirrored screen and runs object detection on each frame. When recording is stopped, results include:
@@ -65,11 +80,15 @@ Detects and visualizes objects in real time using YOLOv8l. To use this feature, 
 
 Both the video and JSON are saved by default on your Mac (Desktop/Heatmap by default), and are also sent to the Vision Pro where they are displayed and can be exported directly to the device.
 
+![Object Detection Demo](Demos/object_detection.png)
+
 ### Average Heatmap (Command Line)
 Generate an average heatmap from a folder containing a video file and multiple JSON files with gaze data.
 Results include:
 - ***Video***: The original video with averaged heatmaps overlaid on each frame, showing the combined gaze data from all sessions.
 - ***JSON***: A file including the name of the video, the count of the averaged JSON files, and the user info for each user whose data was included in the average.
+
+![Averaged Heatmap Demo](Demos/averaged_heatmap.png)
 
 ---
 
@@ -90,23 +109,23 @@ git clone <repo-url>
 cd AppleVisionPro
 ```
 
-### 2. Setting Up the Vision Pro Device (only once)
-- Install Xcode and open the project folder.
-- Ensure the Mac and Vision Pro are on the same Wi-Fi network.
-- On the Vision Pro go to Settings > General > Remote Devices.
-- In Xcode open Window > Devices and Simulators, select your device in the Discovered section in the Devices tab.
-- Click Pair and enter the code shown on Vision Pro.
-- On Vision Pro go to Settings > Privacy & Security > Developer Mode and toggle it on.
-- In Xcode from the device list select your Vision Pro device and click the Play button to build/run the app.
-- If you get a trust warning, on Vision Pro go to Settings > General > VPN & Device Management and trust the developer app.
+### 2. Set Up the Vision Pro Device (only once)
+1. Install Xcode and open the project folder.
+2. Ensure the Mac and Vision Pro are on the same Wi-Fi network.
+3. On the Vision Pro go to Settings > General > Remote Devices.
+4. In Xcode open Window > Devices and Simulators, select your device in the Discovered section in the Devices tab.
+5. Click Pair and enter the code shown on Vision Pro.
+6. On Vision Pro go to Settings > Privacy & Security > Developer Mode and toggle it on.
+7. In Xcode from the device list select your Vision Pro device and click the Play button to build/run the app.
+8. If you get a trust warning, on Vision Pro go to Settings > General > VPN & Device Management and trust the developer app.
 
 
-### 3. Running the App
+### 3. Run the App
 - **On Device:** In Xcode, select your Vision Pro device from the device list and click Play.
 - **On Simulator:** In Xcode, select a Vision Pro simulator from the device list and click Play.
 
 
-### 4. Running the Server
+### 4. Run the Server
 - Set up a virtual environment and install requirements (only once):
   ```
   make setup

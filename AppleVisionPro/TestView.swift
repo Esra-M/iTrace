@@ -34,49 +34,6 @@ struct TestView: View {
                     .bold()
                 
                 HStack(spacing: 30){
-                    //                VStack{
-                    //                    Image(systemName: "character.cursor.ibeam")
-                    //                        .font(.system(size: 50))
-                    //                        .padding()
-                    //
-                    //                    Button("Typing") {
-                    //                        appState.currentPage = .type
-                    //                    }
-                    //
-                    //                }
-                    //                .frame(height: 150, alignment: .bottom)
-                    
-                    
-                    //                VStack{
-                    //                    Image(systemName: "point.topleft.down.to.point.bottomright.filled.curvepath")
-                    //                        .font(.system(size: 50))
-                    //                        .padding()
-                    //
-                    //                    Button("Drag") {
-                    //                        appState.currentPage = .reach
-                    //                        Task {
-                    //                            await openImmersiveSpace(id: "reachObject")
-                    //                        }
-                    //                    }
-                    //
-                    //                }
-                    //                .frame(height: 150, alignment: .bottom)
-                    
-                    //                VStack{
-                    //                    Image(systemName: "dot.scope")
-                    //                        .font(.system(size: 50))
-                    //                        .padding()
-                    //
-                    //                    Button("Target") {
-                    //                        appState.currentPage = .select
-                    //                        Task {
-                    //                            await openImmersiveSpace(id: "selectionObject")
-                    //                        }
-                    //                    }
-                    //
-                    //                }
-                    //                .frame(height: 150, alignment: .bottom)
-                    
                     
                     VStack{
                         Image(systemName: "scope")
@@ -117,7 +74,7 @@ struct TestView: View {
                             .font(.system(size: 45))
                             .padding()
                         
-                        Button("Spacial Eye Tracking") {
+                        Button("Spatial Eye Tracking") {
                             Task{
                                 await openImmersiveSpace(id: "immersiveTracking")
                                 dismissWindow(id: "main")
