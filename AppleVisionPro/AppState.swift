@@ -12,12 +12,8 @@ import Network
 class AppState: ObservableObject {
     enum WindowPage {
         case content
-        case keyboard
         case test
-        case type
         case click
-        case reach
-        case select
         case eyeTracking
         case bullseyeTest
         case videoUpload

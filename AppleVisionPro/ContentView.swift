@@ -33,7 +33,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                Text("Welcome to GazeNav")
+                Text("Welcome to iTrace")
                     .font(.largeTitle)
                     .bold()
                 

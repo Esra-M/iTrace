@@ -13,23 +13,11 @@ struct AppleVisionProApp: App {
                 case .content:
                     ContentView()
                         .frame(width: 1280, height: 720)
-                case .keyboard:
-                    KeyboardView()
-                        .frame(width: 1280, height: 720)
                 case .test:
                     TestView()
                         .frame(width: 1280, height: 720)
-                case .type:
-                    TypingView()
-                        .frame(width: 1280, height: 720)
                 case .click:
                     ClickingView()
-                        .frame(width: 1280, height: 720)
-                case .reach:
-                    ReachView()
-                        .frame(width: 1280, height: 720)
-                case .select:
-                    SelectionView()
                         .frame(width: 1280, height: 720)
                 case .eyeTracking:
                     EyeTrackingView()
@@ -60,13 +48,5 @@ struct AppleVisionProApp: App {
         }
         .windowStyle(.plain)
         
-
-        ImmersiveSpace(id: "selectionObject") {
-            SelectionObjectsView()
-        }
-        ImmersiveSpace(id: "reachObject") {
-            ReachObjectView()
-                .environmentObject(appState)
-        }
     }
 }
