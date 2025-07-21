@@ -88,7 +88,7 @@ Results include:
 - ***Video***: The original video with averaged heatmaps overlaid on each frame, showing the combined gaze data from all sessions.
 - ***JSON***: A file including the name of the video, the count of the averaged JSON files, and the user info for each user whose data was included in the average.
 
-![Averaged Heatmap Demo](Demos/averaged_heatmap.png)
+![Averaged Heatmap Demo](Demos/averaged_heatmap.gif)
 
 ---
 
