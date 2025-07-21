@@ -14,10 +14,12 @@ import threading
 import socket
 from zeroconf import ServiceInfo, Zeroconf
 import uuid
+import queue
 import shutil
 import sys
 import argparse
 import glob
+import re
 
 # Configuration
 OUTPUT_DIR = os.path.expanduser("~/Desktop/Heatmap")
@@ -25,6 +27,344 @@ OUTPUT_DIR = os.path.expanduser("~/Desktop/Heatmap")
 # Global state
 app = Flask(__name__)
 CORS(app)
+
+class ObjectDetectionSystem:
+    def __init__(self):
+        self.recording_process = None
+        self.recording_filepath = None
+        self.detection_model = None
+        self.detection_active = False
+        self.frame_queue = queue.Queue(maxsize=5)
+        self.analysis_thread = None
+        self.latest_detections = []
+        self.detection_lock = threading.Lock()
+        self.session_data = []
+        self.session_lock = threading.Lock()
+        self.ready_time = None
+        self.system_initialized = False
+        self._initialize_yolo()
+    
+    def _initialize_yolo(self):
+        """Initialize YOLO model for object detection"""
+        try:
+            import torch
+            from ultralytics import YOLO
+            self.detection_model = YOLO('yolov8l.pt')
+            print("YOLO model initialized successfully")
+            return True
+        except ImportError:
+            print("YOLO not available. Install ultralytics: pip install ultralytics")
+            return False
+        except Exception as e:
+            print(f"Failed to initialize YOLO model: {e}")
+            return False
+    
+    def start_detection(self):
+        """Start object detection system"""
+        if self.detection_active or self.detection_model is None:
+            return self.detection_model is not None
+        
+        self.detection_active = True
+        self.system_initialized = False
+        
+        # Clear previous data
+        with self.session_lock:
+            self.session_data.clear()
+        self._clear_frame_queue()
+        
+        # Start recording and analysis threads
+        threading.Thread(target=self._record_and_analyze, daemon=True).start()
+        self.analysis_thread = threading.Thread(target=self._analyze_frames, daemon=True)
+        self.analysis_thread.start()
+        
+        return True
+    
+    def stop_detection(self):
+        """Stop object detection and return video path"""
+        self.detection_active = False
+        self.system_initialized = False
+        
+        video_path = self._stop_recording()
+        
+        with self.detection_lock:
+            self.latest_detections = []
+        self._clear_frame_queue()
+        
+        return video_path
+    
+    def get_detections(self):
+        """Get current detections"""
+        with self.detection_lock:
+            return self.latest_detections.copy()
+    
+    def get_session_data(self):
+        """Get complete session data"""
+        with self.session_lock:
+            return self.session_data.copy()
+    
+    def _record_and_analyze(self):
+        """Record video with audio using SoX for audio and FFmpeg for video"""
+        try:
+            # Wait for initialization
+            time.sleep(8)  # Static 8 seconds
+            
+            self.ready_time = time.time()
+            self.system_initialized = True
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.recording_filepath = os.path.join(tempfile.gettempdir(), f"object_detection_{timestamp}.mp4")
+            audio_filepath = os.path.join(tempfile.gettempdir(), f"audio_{timestamp}.wav")
+            video_filepath = os.path.join(tempfile.gettempdir(), f"video_{timestamp}.mp4")
+            
+            # Start SoX audio recording in background
+            audio_cmd = ['sox', '-d', audio_filepath]
+            audio_process = subprocess.Popen(audio_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # FFmpeg video recording
+            cmd = [
+                'ffmpeg', '-f', 'avfoundation', '-i', '1',
+                '-vf', 'crop=iw:ih*0.865:0:ih*0.085',
+                '-r', '30', '-vcodec', 'libx264', 
+                '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-y', video_filepath,
+                '-map', '0:v', '-vf', 'crop=iw:ih*0.865:0:ih*0.085,scale=1280:720',
+                '-r', '5', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'
+            ]
+            
+            self.recording_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**8)
+            
+            frame_size = 1280 * 720 * 3
+            while self.detection_active and self.recording_process:
+                try:
+                    raw_frame = self.recording_process.stdout.read(frame_size)
+                    if len(raw_frame) != frame_size:
+                        break
+                    
+                    frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((720, 1280, 3))
+                    
+                    if not self.frame_queue.full():
+                        self.frame_queue.put(frame)
+                        
+                except Exception as e:
+                    print(f"Error reading frame: {e}")
+                    break
+            
+            # Stop audio recording
+            audio_process.terminate()
+            audio_process.wait()
+            
+            # Merge video and audio
+            merge_cmd = [
+                'ffmpeg', '-i', video_filepath, '-i', audio_filepath,
+                '-c:v', 'copy', '-c:a', 'aac', '-shortest', '-y', self.recording_filepath
+            ]
+            subprocess.run(merge_cmd, capture_output=True)
+            
+            # Clean up temp files
+            try:
+                os.unlink(video_filepath)
+                os.unlink(audio_filepath)
+            except:
+                pass
+                
+        except Exception as e:
+            print(f"Error in recording: {e}")
+
+    def _analyze_frames(self):
+        """Analyze frames for object detection"""
+        while self.detection_active:
+            try:
+                frame = None
+                # Get latest frame
+                while not self.frame_queue.empty():
+                    frame = self.frame_queue.get()
+                
+                if frame is not None and self.system_initialized:
+                    detections = self._detect_objects(frame)
+                    with self.detection_lock:
+                        self.latest_detections = detections
+                else:
+                    time.sleep(0.1)
+                    
+            except Exception as e:
+                print(f"Error in analysis: {e}")
+                time.sleep(1.0)
+    
+    def _detect_objects(self, frame):
+        """Detect objects in frame using YOLO"""
+        if not (self.detection_model and self.system_initialized):
+            return []
+        
+        try:
+            results = self.detection_model(frame, conf=0.5, iou=0.45, verbose=False)
+            detections = []
+            video_timestamp = time.time() - self.ready_time if self.ready_time else 0
+            
+            for result in results:
+                if result.boxes is not None:
+                    for box in result.boxes:
+                        class_id = int(box.cls[0])
+                        class_name = self.detection_model.names[class_id]
+                        confidence = float(box.conf[0])
+                        
+                        # Get normalized coordinates
+                        x_center, y_center, bbox_w, bbox_h = box.xywhn[0].tolist()
+                        screen_x = max(0.0, min(1.0, x_center - bbox_w / 2))
+                        screen_y = max(0.0, min(1.0, y_center - bbox_h / 2))
+                        bbox_w = max(0.0, min(1.0 - screen_x, bbox_w))
+                        bbox_h = max(0.0, min(1.0 - screen_y, bbox_h))
+                        
+                        if bbox_w >= 0.01 and bbox_h >= 0.01: 
+                            detection_data = {
+                                "name": class_name,
+                                "confidence": confidence,
+                                "bbox": {"x": screen_x, "y": screen_y, "width": bbox_w, "height": bbox_h}
+                            }
+                            detections.append(detection_data)
+                            
+                            # Log to session data
+                            with self.session_lock:
+                                self.session_data.append({
+                                    "object_name": class_name,
+                                    "confidence": confidence,
+                                    "timestamp": round(video_timestamp, 2),
+                                    "bounding_box": {"x": screen_x, "y": screen_y, "width": bbox_w, "height": bbox_h}
+                                })
+            
+            return sorted(detections, key=lambda x: x['confidence'], reverse=True)[:15]
+            
+        except Exception as e:
+            print(f"Error in object detection: {e}")
+            return []
+    
+    def _stop_recording(self):
+        """Stop recording and return video path"""
+        if self.recording_process:
+            try:
+                self.recording_process.terminate()
+                self.recording_process.wait(timeout=10)
+            except:
+                self.recording_process.kill()
+            finally:
+                self.recording_process = None
+        
+        return self.recording_filepath
+    
+    def _clear_frame_queue(self):
+        """Clear frame queue"""
+        while not self.frame_queue.empty():
+            try:
+                self.frame_queue.get_nowait()
+            except:
+                break
+    
+    def save_session_data(self, user_data, video_path):
+        """Save session data to JSON file"""
+        try:
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            
+            session_detections = self.get_session_data()
+            unique_objects = list(set(d["object_name"] for d in session_detections))
+            
+            session_data = {
+                "tracking_type": "object_detection",
+                "user_name": user_data.get('user_name', 'unknown_user'),
+                "user_gender": user_data.get('user_gender', 'Unknown'),
+                "user_age": user_data.get('user_age', 0),
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "unique_objects": unique_objects,
+                "detected_objects": session_detections
+            }
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            user_name = user_data.get('user_name', 'unknown_user').replace(' ', '_')
+            json_filename = f"{user_name}_object_detection_{timestamp}.json"
+            json_path = os.path.join(OUTPUT_DIR, json_filename)
+            
+            with open(json_path, 'w') as f:
+                json.dump(session_data, f, indent=2)
+            
+            return json_path
+            
+        except Exception as e:
+            print(f"Error saving session data: {e}")
+            return None
+    
+    def save_video_to_desktop(self, user_data):
+        """Save recorded video to desktop"""
+        if not self.recording_filepath or not os.path.exists(self.recording_filepath):
+            return None
+        
+        try:
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            user_name = user_data.get('user_name', 'unknown_user').replace(' ', '_')
+            video_filename = f"{user_name}_object_detection_{timestamp}.mp4"
+            final_path = os.path.join(OUTPUT_DIR, video_filename)
+            
+            shutil.move(self.recording_filepath, final_path)
+            return final_path
+            
+        except Exception as e:
+            print(f"Error saving video: {e}")
+            return None
+
+# Global detection system instance
+detection_system = ObjectDetectionSystem()
+
+def load_json_files(folder_path):
+    """Load all JSON files from the specified folder"""
+    json_files = glob.glob(os.path.join(folder_path, "*.json"))
+    all_click_data = []
+    
+    print(f"Found {len(json_files)} JSON files in {folder_path}")
+    
+    for json_file in json_files:
+        try:
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+                
+            print(f"Processing {os.path.basename(json_file)}")
+            
+            # Extract click data
+            if 'click_data' in data:
+                # Direct click data format
+                clicks = data['click_data']
+            elif 'detected_objects' in data:
+                # Object detection format
+                clicks = []
+                for obj in data['detected_objects']:
+                    if 'bounding_box' in obj:
+                        bbox = obj['bounding_box']
+                        # Use center of bounding box as click point
+                        center_x = bbox['x'] + bbox['width'] / 2
+                        center_y = bbox['y'] + bbox['height'] / 2
+                        clicks.append({
+                            'x': center_x,
+                            'y': center_y,
+                            'timestamp': obj.get('timestamp', 0)
+                        })
+            else:
+                print(f"Warning: No recognized click data format in {json_file}")
+                continue
+            
+            # Add clicks to the combined list
+            for click in clicks:
+                if 'x' in click and 'y' in click and 'timestamp' in click:
+                    all_click_data.append({
+                        'x': float(click['x']),
+                        'y': float(click['y']),
+                        'timestamp': float(click['timestamp']),
+                        'source_file': os.path.basename(json_file)
+                    })
+            
+            print(f"Added {len(clicks)} clicks from {os.path.basename(json_file)}")
+            
+        except Exception as e:
+            print(f"Error processing {json_file}: {e}")
+    
+    print(f"Total clicks loaded: {len(all_click_data)}")
+    return all_click_data
 
 def find_video_file(folder_path):
     """Find the first video file in the folder"""
@@ -413,6 +753,57 @@ def register_service(port):
         print(f"Failed to register service: {e}")
         return None, None
 
+@app.route('/start_detection', methods=['POST'])
+def start_detection():
+    if detection_system.start_detection():
+        return jsonify({"status": "success", "message": "Detection started"})
+    else:
+        return jsonify({"status": "error", "message": "Object detection not available"}), 500
+
+@app.route('/stop_detection', methods=['POST'])
+def stop_detection():
+    # Stop detection system
+    recorded_video_path = detection_system.stop_detection()
+    
+    # Get request data
+    try:
+        data = request.get_json()
+        tracking_data = data.get('tracking_data', {})
+        return_video = data.get('return_video', False)
+    except:
+        tracking_data = {}
+        return_video = False
+    
+    # Save video and session data
+    saved_video_path = detection_system.save_video_to_desktop(tracking_data)
+    session_json_path = detection_system.save_session_data(tracking_data, saved_video_path)
+    
+    if return_video and saved_video_path and os.path.exists(saved_video_path):
+        # Return video file with session data in headers
+        session_data = {}
+        if session_json_path and os.path.exists(session_json_path):
+            try:
+                with open(session_json_path, 'r') as f:
+                    session_data = json.load(f)
+            except:
+                pass
+        
+        response = send_file(saved_video_path, mimetype='video/mp4', download_name='object_detection_video.mp4')
+        
+        if session_data:
+            response.headers['X-Session-Data'] = json.dumps(session_data)
+        
+        return response
+    else:
+        return jsonify({
+            "status": "success",
+            "message": "Detection stopped and video saved",
+            "video_path": saved_video_path,
+            "session_data_path": session_json_path
+        })
+
+@app.route('/get_detections', methods=['GET'])
+def get_detections():
     if not detection_system.detection_active:
         return jsonify({"status": "error", "message": "Detection not active"}), 400
     

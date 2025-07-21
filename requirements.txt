@@ -4,4 +4,6 @@ opencv-python
 matplotlib
 numpy
 zeroconf
-
+ultralytics
+torch
+sox
