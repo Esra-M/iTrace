@@ -8,6 +8,8 @@ An Apple Vision Pro project where you can track your gaze across videos and real
 - ***Object Detection***: Detect and visualize objects in real time using YOLOv8l.
 - ***Averaged Heatmap (Command Line)***: Generate an average heatmap video from multiple eye tracking sessions.
 
+🎥 **[Watch the full demo video here](https://youtu.be/QbtUBjWWvpc)**
+
 ---
 
 ## Features
